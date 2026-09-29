@@ -7,20 +7,22 @@
 #   packages:
 #     display_hw: !include pak/zz_be_mon_hw_esp32_2432s024r.yaml
 # and comment the `vnc` package out: it keeps a copy of the frame in RAM.
-# Taken from a configuration that runs on the board: `ili9xxx` model `TFT 2.4R`, XPT2046 with
-# the calibration and the mirrored axes below. Not run with this interface yet.
+# Taken from a configuration that runs on the board (there with the `ili9xxx` platform, model
+# `TFT 2.4R`, which ESPHome has deprecated); the panel is driven here by `mipi_spi` with the
+# `ILI9342` model (320x240 as it comes, mirrored in X by the model: the same MADCTL as before,
+# with RGB colours). Its init sequence differs a little from the ili9xxx one (gamma curves,
+# display function control), so look at the first start: NOT RUN ON THE BOARD with mipi_spi.
+# The XPT2046 keeps the calibration and the mirrored axes of the working configuration.
 #
 # How it differs from the other CYD pak (zz_be_mon_hw_esp32_2432s028r.yaml):
-#   - the panel is driven as 320x240 (model `TFT 2.4R`), not as a portrait 240x320 one;
+#   - the panel is driven as 320x240 (model ILI9342), not as a portrait 240x320 one;
 #   - the XPT2046 sits on the same SPI bus as the panel (CLK 14 / MOSI 13 / MISO 12), chip
 #     select 33, no interrupt line used;
 #   - the backlight is on GPIO27.
-# ESPHome marks `ili9xxx` deprecated; it still works and is what runs on this board. Its
-# `mipi_spi` counterpart is `model: ILI9342` with `color_order: RGB` (same 320x240, same MADCTL;
-# its init sequence differs a little): switch to that when ili9xxx goes away, and try it first.
 # The board's RGB LED (GPIO4 / 16 / 17, inverted) and the light sensor (GPIO34) are not used.
 # If taps land mirrored, change `transform`; if they are offset, `calibration`. If the colours
-# are swapped, flip `color_order` (rgb / bgr). 320x240 is small: expect small print.
+# are swapped, flip `color_order` (RGB / BGR); if the picture is mirrored, `transform` on the
+# display. 320x240 is small: expect small print.
 #
 # What a pak provides: see zz_be_mon_hw_template.yaml
 # =============================================================================
@@ -49,11 +51,11 @@ output:
     pin: GPIO27
 
 display:
-  - platform: ili9xxx
+  - platform: mipi_spi
     id: my_display
-    model: TFT 2.4R
     spi_id: tft_spi
-    color_order: rgb
+    model: ILI9342
+    color_order: RGB
     invert_colors: false
     cs_pin:
       number: GPIO15
@@ -61,6 +63,7 @@ display:
     dc_pin:
       number: GPIO2
       ignore_strapping_warning: true
+    data_rate: 40MHz
     update_interval: never
     auto_clear_enabled: false
 

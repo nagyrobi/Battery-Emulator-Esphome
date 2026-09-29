@@ -106,7 +106,7 @@ small below about 3.5".
 | `lilygo_tdisplay_s3_touch` | LILYGO T-Display-S3, touch version | 170x320 ST7789 used as 320x170 landscape, CST816 | no |
 | `lilygo_tdisplay_s3` | LILYGO T-Display-S3, no touch | the same; the two buttons page through the screens | no |
 | `esp32_2432s028r` | ESP32-2432S028R "Cheap Yellow Display" (plain ESP32, no PSRAM: comment `vnc` out) | 240x320 ILI9341 used as 320x240 landscape, XPT2046 resistive touch | no |
-| `esp32_2432s024r` | The 2.4" resistive CYD (ESP32-2432S024R pinout; plain ESP32, no PSRAM: comment `vnc` out) | 320x240 `ili9xxx` model `TFT 2.4R` as it comes (no rotation), XPT2046 resistive touch on the panel's SPI bus, backlight GPIO27 | no |
+| `esp32_2432s024r` | The 2.4" resistive CYD (ESP32-2432S024R pinout; plain ESP32, no PSRAM: comment `vnc` out) | 320x240 ILI9342 (`mipi_spi`) as it comes (no rotation), XPT2046 resistive touch on the panel's SPI bus, backlight GPIO27 | no |
 
 The CYD is not in the esphome-devices collection: its pak uses the pins of the common CYD pinout
 (see the notes at its top for the batch-to-batch differences). On the T-Display-S3 without touch,
