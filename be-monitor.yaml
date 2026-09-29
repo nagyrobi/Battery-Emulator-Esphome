@@ -1,10 +1,10 @@
 # =============================================================================
 # Battery-Emulator ESP-NOW monitor - for the Guition ESP32-S3 touch displays
 #
-# Hardware: one line under `packages:` below picks the pak for your display (pak/zz_hw_*).
+# Hardware: one line under `packages:` below picks the pak for your display (pak/zz_be_mon_hw_*).
 #           A pak holds everything that is specific to the board: chip setup, buses,
 #           panel, touch controller, backlight pin and the panel size. To add a display,
-#           copy pak/zz_hw_template.yaml.
+#           copy pak/zz_be_mon_hw_template.yaml.
 # UI:   the design of sort282-rgb/battery-display-esp32-4848s040c (v15.9), rebuilt
 #       with the ESPHome LVGL component: the same navy card layout, palette,
 #       Inter / Montserrat typography, SOC arc dashboard, per-cell bar monitor, event
@@ -12,7 +12,7 @@
 #       It sizes itself from the panel: 480x480 squares as in the reference, and
 #       landscape screens (480x320, 480x272, 800x480, 1024x600 ... and a portrait panel
 #       rotated by its pak) get a compact arrangement of the same pages. The measures
-#       are the tokens in pak/zz_ui_layout.yaml; the pages below hold no pixel numbers.
+#       are the tokens in pak/zz_be_mon_ui_layout.yaml; the pages below hold no pixel numbers.
 # Data: the Battery-Emulator ESP-NOW v2 TLV protocol (protocol_version 2), received
 #       straight from the emulator - no router hop, no web polling, read-only.
 #
@@ -168,13 +168,13 @@ api:
 #   touchscreen    my_touch
 #   lvgl           buffer_size (and rotation)
 # The user interface sizes itself from the resulting screen size. To add a display, copy
-# pak/zz_hw_template.yaml.
+# pak/zz_be_mon_hw_template.yaml.
 packages:
   # The screen-size tokens are worked out from what the hardware pak states, so this one
   # has to stay ABOVE it: ESPHome reads the packages bottom to top.
-  ui_layout: !include pak/zz_ui_layout.yaml
-  display_hw: !include pak/zz_hw_guition_4848s040.yaml
-  # display_hw: !include pak/zz_hw_guition_jc3248w535.yaml
+  ui_layout: !include pak/zz_be_mon_ui_layout.yaml
+  display_hw: !include pak/zz_be_mon_hw_guition_4848s040.yaml
+  # display_hw: !include pak/zz_be_mon_hw_guition_jc3248w535.yaml
 
 light:
   - id: display_backlight

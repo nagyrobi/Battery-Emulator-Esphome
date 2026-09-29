@@ -2,8 +2,7 @@
 
 An ESPHome touch display for [Battery-Emulator](https://github.com/dalathegreat/Battery-Emulator).
 It listens to the emulator's ESP-NOW telemetry (protocol v2, read-only, no router hop) and shows
-it on a Guition ESP32-S3 panel in the look of
-[sort282-rgb/battery-display-esp32-4848s040c](https://github.com/sort282-rgb/battery-display-esp32-4848s040c),
+it on a various ESP32-based displays, in the look of [sort282-rgb](https://github.com/sort282-rgb/battery-display-esp32-4848s040c),
 built with ESPHome's LVGL component.
 
 `be-monitor_2.yaml` is the config to compile. It needs ESPHome **2026.9.0** or newer.
@@ -14,10 +13,24 @@ built with ESPHome's LVGL component.
 
 (The three screens of the [same config](be-monitor_2.yaml), rendered from the ESPHome host build with simulated emulator frames: 480x480, 480x320 and 800x480.)
 
+Pages, each one stacked as title bar, blocks that share the remaining height, and the page dots:
+
+| Page | Content |
+|---|---|
+| MAIN | Status header with animated battery, flow arrow and emulator status. SOC arc with pack voltage, power, current, cell max/min, delta (green below 100 mV, amber up to 300 mV, red above) and temperature. With several packs the cell columns show the installation's scaled remaining/total energy and max discharge/charge power. An amber (red for errors) bar links to an active event. |
+| BATTERIES | One card per pack (only with more than one pack). Tap a card for its cells. |
+| CELL MONITOR | All cells of the selected pack; lowest, highest and balancing cells marked. Tap or drag across the bars to read cells. |
+| EVENTS | The emulator's 10 newest events. |
+| BATTERY INFO | Contactors, BMS, CAN links, limits, balancing, isolation. |
+| ENERGY | Remaining and total energy as the inverter is given it: the SOC window when the emulator scales its SOC, with the real values small beside them (left out when nothing is scaled). Lifetime throughput, limits. |
+| DISPLAY MENU | Shortcuts, next emulator, screen off. |
+| SYSTEM | One button per configured emulator picks the one being watched and shows its diagnostics; **Display** shows this panel: backlight slider (kept across restarts), MAC, SSID, signal, IP, uptime, free heap. |
+
+Swipe left or right (the pages wrap) or tap a page dot.
+
 ## Setup
 
-1. `secrets.yaml`: `wifi_ssid`, `wifi_password`, `wifi_ssid_hif`, `wifi_password_hif`,
-   `ota_password`, `encryption_key`, `vnc_password`.
+1. Add a `secrets.yaml` wwith your: `wifi_ssid`, `wifi_password`, `ota_password`, `encryption_key`.
 2. Emulators, at the top of `be-monitor_2.yaml`: name and STA MAC of up to three
    (`emulator_N_name` / `emulator_N_mac`). Set a MAC to `""` to switch that emulator off: it
    gets no peer and no button, NEXT EMULATOR skips it, and with one left the panel only deals
@@ -68,25 +81,10 @@ tokens:
 Each measure is written `(square, wide)` in pixels at `ui_k = 1`, so tuning the look for one
 kind of screen means changing that number in `zz_ui_layout.yaml`.
 
-Pages, each one stacked as title bar, blocks that share the remaining height, and the page dots:
 
-| Page | Content |
-|---|---|
-| MAIN | Status header with animated battery, flow arrow and emulator status. SOC arc with pack voltage, power, current, cell max/min, delta (green below 100 mV, amber up to 300 mV, red above) and temperature. With several packs the cell columns show the installation's scaled remaining/total energy and max discharge/charge power. An amber (red for errors) bar links to an active event. |
-| BATTERIES | One card per pack (only with more than one pack). Tap a card for its cells. |
-| CELL MONITOR | All cells of the selected pack; lowest, highest and balancing cells marked. Tap or drag across the bars to read cells. |
-| EVENTS | The emulator's 10 newest events. |
-| BATTERY INFO | Contactors, BMS, CAN links, limits, balancing, isolation. |
-| ENERGY | Remaining and total energy as the inverter is given it: the SOC window when the emulator scales its SOC, with the real values small beside them (left out when nothing is scaled). Lifetime throughput, limits. |
-| DISPLAY MENU | Shortcuts, next emulator, screen off. |
-| SYSTEM | One button per configured emulator picks the one being watched and shows its diagnostics; **Display** shows this panel: backlight slider (kept across restarts), MAC, SSID, signal, IP, uptime, free heap. |
-
-Swipe left or right (the pages wrap) or tap a page dot.
-
-## Checked
+# Checked
 
 `esphome config` and C++ code generation pass for both paks. The whole UI was also built for
 ESPHome's `host` platform with an SDL window (same LVGL YAML and lambdas, LVGL 9.5.0, no
 warnings) and driven with simulated Battery-Emulator frames at 480x480, 480x320, 480x272,
-800x480, 1024x600 and 320x240, including the emulator selection and its restore. It has not
-been run on the JC3248W535.
+800x480, 1024x600 and 320x240, including the emulator selection and its restore. 

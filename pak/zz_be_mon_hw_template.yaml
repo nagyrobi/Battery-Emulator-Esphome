@@ -1,8 +1,8 @@
 # =============================================================================
-# Hardware pak TEMPLATE - copy this to pak/zz_hw_<board>.yaml, fill it in, and select it
+# Hardware pak TEMPLATE - copy this to pak/zz_be_mon_hw_<board>.yaml, fill it in, and select it
 # in the main config:
 #   packages:
-#     display_hw: !include pak/zz_hw_<board>.yaml
+#     display_hw: !include pak/zz_be_mon_hw_<board>.yaml
 #
 # The main config knows nothing about the board. This file is the whole contract:
 #
