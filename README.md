@@ -85,7 +85,7 @@ Swipe left or right (the pages wrap) or tap a page dot.
 
 The emulator you pick on SYSTEM (or with NEXT EMULATOR) is remembered across restarts.
 
-## Displays
+## Displays preconfigured
 
 Only the first two boards have been run. The others are written from the
 [esphome-devices](https://devices.esphome.io/) entry of the board and ESPHome's built-in display
