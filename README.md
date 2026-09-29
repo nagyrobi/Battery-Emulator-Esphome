@@ -68,7 +68,7 @@ Swipe left or right (the pages wrap) or tap a page dot.
      display_hw: !include pak/zz_be_mon_hw_guition_4848s040.yaml
      # display_hw: !include pak/zz_be_mon_hw_guition_jc3248w535.yaml
      # ...
-     vnc: !include pak/zz_be_mon_vnc.yaml
+     # vnc: !include pak/zz_be_mon_vnc.yaml
    ```
 
    The order matters, because ESPHome reads packages bottom to top: `ui_layout` stays above the
