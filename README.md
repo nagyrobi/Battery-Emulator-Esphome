@@ -34,7 +34,7 @@ Pages, each one stacked as title bar, blocks that share the remaining height, an
 | Page | Content |
 |---|---|
 | MAIN | Status header with animated battery, flow arrow and emulator status. SOC arc with pack voltage, power, current, cell max/min, delta (green below 100 mV, amber up to 300 mV, red above) and temperature. With several packs the cell columns show the installation's scaled remaining/total energy and max discharge/charge power. An amber (red for errors) bar links to an active event. |
-| BATTERIES | One card per pack (only with more than one pack), its three lines of text in the largest font that fits the card's full width. Tap a card for its cells. |
+| BATTERIES | One card per pack (only with more than one pack), its three lines of text centered, in one fixed font (the largest that fits the widest values a pack can report, so it never changes size while running). Tap a card for its cells. |
 | CELL MONITOR | All cells of the selected pack; lowest, highest and balancing cells marked. Tap or drag across the bars to read cells (dragging over the bars does not change the page; swipe from outside the chart). |
 | EVENTS | The emulator's 10 newest events. |
 | BATTERY INFO | Contactors, BMS, CAN links, limits, balancing, isolation. |

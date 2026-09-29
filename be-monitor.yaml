@@ -950,6 +950,44 @@ espnow:
               // BATTERIES card of this pack (the reference's multi-pack dashboard)
               if (multi) {
                 lv_obj_t* bt[3] = {id(bt_1), id(bt_2), id(bt_3)};
+                // The pack text has ONE font, worked out once and never changed, so it
+                // cannot jump as the values change: the largest whose widest line, measured
+                // on the widest values a pack can report (not on what is shown now), fits
+                // the label, and whose three lines fit a card when three packs share the page.
+                static const lv_font_t* pk_font = nullptr;
+                if (pk_font == nullptr) {
+                  const lv_font_t* ladder[6] = {id(f_pk1)->get_lv_font(), id(f_pk2)->get_lv_font(),
+                                                id(f_pk3)->get_lv_font(), id(f_pk4)->get_lv_font(),
+                                                id(f_pk5)->get_lv_font(), id(f_pk6)->get_lv_font()};
+                  lv_obj_t* page = lv_obj_get_parent(lv_obj_get_parent(bt[0]));
+                  lv_obj_update_layout(page);
+                  const int aw = lv_obj_get_width(bt[0]);
+                  int others = 0, nvis = 0;   // the blocks of the page that are not pack cards
+                  for (uint32_t i = 0; i < lv_obj_get_child_count(page); i++) {
+                    lv_obj_t* c = lv_obj_get_child(page, i);
+                    if (c == id(bc_1) || c == id(bc_2) || c == id(bc_3) || lv_obj_has_flag(c, LV_OBJ_FLAG_HIDDEN)) continue;
+                    others += lv_obj_get_height(c);
+                    nvis++;
+                  }
+                  const int ah = (lv_obj_get_content_height(page) - others - (nvis + 2) * ${g}) / 3 - 2 * ${cap_y};
+                  const int ls = ${bt_ls};
+                  static const char* const WORST[3] = {
+                      "SoH 100.0%, SoC 100.0%, Cap. 888.8 kWh rem. 888.8 kWh",
+                      "-888.8kW, -888.8A, max dis/ch: 888.8/888.8kW; 888.8/888.8A",
+                      "Cells 8888/8888 mV, Δ 8888 mV, Temp -88.8/-88.8 °C"};
+                  const lv_font_t* pick = ladder[5];
+                  for (int fi = 0; fi < 6; fi++) {
+                    int widest = 0;
+                    for (const char* line : WORST) {
+                      lv_point_t sz;
+                      lv_text_get_size(&sz, line, ladder[fi], 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                      if (sz.x > widest) widest = sz.x;
+                    }
+                    if (widest <= aw && 3 * (int) lv_font_get_line_height(ladder[fi]) + 2 * ls <= ah) { pick = ladder[fi]; break; }
+                  }
+                  for (auto* l : bt) lv_obj_set_style_text_font(l, pick, LV_PART_MAIN);
+                  if (aw > 0) pk_font = pick;   // measured on a laid-out page: keep it
+                }
                 if (std::isnan(soc)) {
                   put(bt[ps], "NO LIVE DATA FROM THIS PACK");
                   col(bt[ps], 0x${c_red});
@@ -969,30 +1007,6 @@ espnow:
                       fs("%.0f", cmax > 0 ? (float)cmax : NAN) + " mV, Δ " +
                       fs("%.0f", (cmin > 0 && cmax > 0) ? (float)(cmax - cmin) : NAN) +
                       " mV, Temp " + fs("%.1f", tmin) + "/" + fs("%.1f", tmax) + " °C";
-                  // The text takes the largest font whose widest line fits the label and
-                  // whose three lines fit the card.
-                  const lv_font_t* ladder[6] = {id(f_pk1)->get_lv_font(), id(f_pk2)->get_lv_font(),
-                                                id(f_pk3)->get_lv_font(), id(f_pk4)->get_lv_font(),
-                                                id(f_pk5)->get_lv_font(), id(f_pk6)->get_lv_font()};
-                  lv_obj_update_layout(lv_obj_get_parent(bt[ps]));
-                  const int aw = lv_obj_get_width(bt[ps]);
-                  const int ah = lv_obj_get_height(lv_obj_get_parent(bt[ps])) - 2 * ${cap_y};
-                  const int ls = ${bt_ls};
-                  const lv_font_t* pick = ladder[5];
-                  for (int fi = 0; fi < 6; fi++) {
-                    int widest = 0;
-                    for (size_t from = 0; from < t.size();) {
-                      size_t to = t.find('\n', from);
-                      if (to == std::string::npos) to = t.size();
-                      lv_point_t sz;
-                      lv_text_get_size(&sz, t.substr(from, to - from).c_str(), ladder[fi], 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-                      if (sz.x > widest) widest = sz.x;
-                      from = to + 1;
-                    }
-                    if (widest <= aw && 3 * (int) lv_font_get_line_height(ladder[fi]) + 2 * ls <= ah) { pick = ladder[fi]; break; }
-                  }
-                  if (lv_obj_get_style_text_font(bt[ps], LV_PART_MAIN) != pick)
-                    lv_obj_set_style_text_font(bt[ps], pick, LV_PART_MAIN);
                   put(bt[ps], t.c_str());
                   col(bt[ps], chg == 1 ? 0x${c_green} : chg == 2 ? 0x${c_blue} : 0xFFFFFF);
                 }
@@ -2369,7 +2383,7 @@ lvgl:
               - script.execute: { id: select_pack, pack: 0 }
               - lvgl.page.show: pg_cells
             widgets:
-              - label: { id: bt_1, align: LEFT_MID, x: "${bt_x}", width: "${bt_w}", text: "WAITING FOR DATA", text_font: f_txt, text_line_space: "${bt_ls}", text_color: "0x${c_muted}" }
+              - label: { id: bt_1, align: CENTER, width: "${bt_w}", text: "WAITING FOR DATA", text_align: CENTER, long_mode: CLIP, text_font: f_txt, text_line_space: "${bt_ls}", text_color: "0x${c_muted}" }
         - obj:
             id: bc_2
             styles: st_card
@@ -2382,7 +2396,7 @@ lvgl:
               - script.execute: { id: select_pack, pack: 1 }
               - lvgl.page.show: pg_cells
             widgets:
-              - label: { id: bt_2, align: LEFT_MID, x: "${bt_x}", width: "${bt_w}", text: "WAITING FOR DATA", text_font: f_txt, text_line_space: "${bt_ls}", text_color: "0x${c_muted}" }
+              - label: { id: bt_2, align: CENTER, width: "${bt_w}", text: "WAITING FOR DATA", text_align: CENTER, long_mode: CLIP, text_font: f_txt, text_line_space: "${bt_ls}", text_color: "0x${c_muted}" }
         - obj:
             id: bc_3
             styles: st_card
@@ -2395,7 +2409,7 @@ lvgl:
               - script.execute: { id: select_pack, pack: 2 }
               - lvgl.page.show: pg_cells
             widgets:
-              - label: { id: bt_3, align: LEFT_MID, x: "${bt_x}", width: "${bt_w}", text: "WAITING FOR DATA", text_font: f_txt, text_line_space: "${bt_ls}", text_color: "0x${c_muted}" }
+              - label: { id: bt_3, align: CENTER, width: "${bt_w}", text: "WAITING FOR DATA", text_align: CENTER, long_mode: CLIP, text_font: f_txt, text_line_space: "${bt_ls}", text_color: "0x${c_muted}" }
         - label: { width: 100%, text: "TAP A BATTERY FOR ITS CELLS   |   SWIPE FOR MORE", text_align: CENTER, text_font: m_hint, text_color: "0x${c_muted}" }
 
     # =========================================================================
