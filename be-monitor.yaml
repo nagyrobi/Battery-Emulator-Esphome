@@ -190,7 +190,7 @@ packages:
   # Mirrors the screen to a VNC client, which can also click through it. Keeps a copy of
   # the frame (width x height x 2 bytes) in RAM, so it wants PSRAM, and needs
   # `vnc_password` in secrets.yaml. Comment it out on a board without PSRAM.
-  vnc: !include pak/zz_be_mon_vnc.yaml
+  # vnc: !include pak/zz_be_mon_vnc.yaml
 
 light:
   - id: display_backlight
