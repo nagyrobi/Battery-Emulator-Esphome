@@ -4,15 +4,16 @@
 #
 # Included from the main config:
 #   packages:
-#     display_hw: !include pak/zz_hw_guition_jc3248w535.yaml
-# NOT YET RUN ON THE BOARD: the panel is a portrait one, so `lvgl: rotation` (90 or 270,
+#     display_hw: !include pak/zz_be_mon_hw_guition_jc3248w535.yaml
+#
+# Tested on the board. The panel is a portrait one, so `lvgl: rotation` (90 or 270,
 # whichever puts the top of the UI where you want it) makes it landscape - and disp_rot
 # must say the same. Flip both if the picture is upside down. The touch follows through
 # `display: my_display`. (With the VNC display in the LVGL list, LVGL rotates in software
 # and feeds every display the panel's own 320x480, which is why disp_w / disp_h stay
-# portrait.)
+# portrait; without the `vnc` package the display driver rotates in hardware.)
 #
-# What a pak provides: see zz_hw_template.yaml
+# What a pak provides: see zz_be_mon_hw_template.yaml
 # =============================================================================
 
 substitutions:
@@ -61,6 +62,8 @@ touchscreen:
     id: my_touch
     display: my_display
     update_interval: 30ms  # LVGL detects swipes from successive samples: poll fast
+    on_release:
+      - script.execute: wake_ui
     # interrupt_pin:
     #   number: 3
     #   ignore_strapping_warning: true
@@ -71,5 +74,9 @@ touchscreen:
     #   y_max: 319
 
 lvgl:
+  displays:
+    - my_display
+  touchscreens:
+    - my_touch
   buffer_size: 25%           # the QSPI panel is flushed in slices
   rotation: 90

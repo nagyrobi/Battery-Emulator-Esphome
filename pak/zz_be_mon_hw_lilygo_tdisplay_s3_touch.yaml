@@ -1,0 +1,85 @@
+# =============================================================================
+# Hardware pak: LILYGO T-Display-S3 (touch version) - 1.9" 170x320 ST7789 panel on an
+# 8-bit parallel bus, CST816 touch, ESP32-S3 with 16 MB flash and 8 MB PSRAM. Used as a
+# 320x170 landscape screen.
+#
+# Included from the main config:
+#   packages:
+#     display_hw: !include pak/zz_be_mon_hw_lilygo_tdisplay_s3_touch.yaml
+# NOT RUN ON THE BOARD. Written from the esphome-devices entry "Lilygo TDisplay S3 Touch"
+# and ESPHome's built-in `t-display-s3` model. The panel is a portrait one: `lvgl:
+# rotation` (270 or 90) makes it landscape, and disp_rot has to say the same. This is a
+# very small screen (about 1.9"): the interface is scaled down to fit, so expect small
+# print.
+#
+# What a pak provides: see zz_be_mon_hw_template.yaml
+# =============================================================================
+
+substitutions:
+  disp_w: 170              # the panel as its driver reports it ...
+  disp_h: 320
+  disp_rot: 270            # ... and the rotation that makes the UI 320x170 landscape
+
+esp32:
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+spi:
+  type: octal
+  clk_pin: 8
+  data_pins:
+    - 39
+    - 40
+    - 41
+    - 42
+    - ignore_strapping_warning: true
+      number: 45
+    - ignore_strapping_warning: true
+      number: 46
+    - 47
+    - 48
+
+i2c:
+  - id: i2c_onboard
+    scl: 17
+    sda: 18
+    scan: false
+    frequency: 400kHz
+
+output:
+  - platform: ledc
+    id: gpio_backlight_pwm
+    pin: GPIO38
+    frequency: 2000
+
+display:
+  - platform: mipi_spi
+    id: my_display
+    model: t-display-s3
+    update_interval: never
+    auto_clear_enabled: false
+
+touchscreen:
+  - platform: cst816
+    id: my_touch
+    i2c_id: i2c_onboard
+    display: my_display
+    interrupt_pin: 16
+    reset_pin: 21
+    update_interval: 16ms      # LVGL detects swipes from successive samples: poll fast
+    on_release:
+      - script.execute: wake_ui
+
+lvgl:
+  displays:
+    - my_display
+  touchscreens:
+    - my_touch
+  buffer_size: 100%
+  rotation: 270

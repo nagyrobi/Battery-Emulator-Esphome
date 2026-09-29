@@ -1,6 +1,6 @@
 # =============================================================================
-# Hardware pak TEMPLATE - copy this to pak/zz_be_mon_hw_<board>.yaml, fill it in, and select it
-# in the main config:
+# Hardware pak TEMPLATE - copy this to pak/zz_be_mon_hw_<board>.yaml, fill it in, and
+# select it in the main config (be-monitor.yaml):
 #   packages:
 #     display_hw: !include pak/zz_be_mon_hw_<board>.yaml
 #
@@ -12,18 +12,27 @@
 #     disp_rot        0, 90, 180 or 270: the LVGL rotation. The user interface wants a
 #                     landscape (or square) screen, so a portrait panel gets 90 or 270.
 #                     Must match `lvgl: rotation` below (leave that out for 0).
-#   esp32, psram      the chip, flash size and the memory setup
+#   esp32, psram      the chip, flash size and the memory setup. Boards without PSRAM also
+#                     comment the `vnc` package out in the main config.
 #   buses             spi / i2c / whatever the panel and the touch controller sit on
 #   output            an output with id `gpio_backlight_pwm`: the backlight pin. The main
-#                     config builds the `display_backlight` light on it.
+#                     config builds the `display_backlight` light on it. (A board that
+#                     switches its backlight some other way - through a power-management
+#                     chip, say - does not fit this contract as it is.)
 #   display           one entry with id `my_display`
-#   touchscreen       one entry with id `my_touch`. Do not put `on_release` here: the main
-#                     config adds it (id: !extend my_touch). Poll it every 16-30 ms, LVGL
-#                     recognises swipes from successive samples.
-#   lvgl              `buffer_size`, and `rotation` when disp_rot is not 0
+#   touchscreen       one entry with id `my_touch`, with
+#                       on_release:
+#                         - script.execute: wake_ui
+#                     so that a touch wakes a sleeping screen. Poll it every 16-30 ms: LVGL
+#                     recognises swipes from successive samples. A board WITHOUT touch
+#                     leaves this out and wakes / pages from its buttons instead (see
+#                     zz_be_mon_hw_lilygo_tdisplay_s3.yaml).
+#   lvgl              displays: [my_display], touchscreens: [my_touch] (if any),
+#                     buffer_size, and `rotation` when disp_rot is not 0
 #
 # What the pak must NOT contain: wifi, api, ota, logger, fonts, lvgl pages or scripts.
-# Those are the same for every board.
+# Those are the same for every board. The interface sizes itself from disp_w / disp_h /
+# disp_rot (pak/zz_be_mon_ui_layout.yaml): no pixel numbers belong in a pak.
 # =============================================================================
 
 substitutions:
@@ -55,6 +64,8 @@ output:
 # display:
 #   - platform: ...             # or mipi_spi / mipi_rgb with a `model:`
 #     id: my_display
+#     update_interval: never
+#     auto_clear_enabled: false
 #     ...
 
 # touchscreen:
@@ -62,7 +73,13 @@ output:
 #     id: my_touch
 #     display: my_display
 #     update_interval: 30ms
+#     on_release:
+#       - script.execute: wake_ui
 
 lvgl:
+  displays:
+    - my_display
+  # touchscreens:
+  #   - my_touch
   buffer_size: 25%               # 100% when the panel has PSRAM to spare and no slow bus
   # rotation: 90                 # for a portrait panel, together with disp_rot: 90

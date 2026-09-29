@@ -1,0 +1,97 @@
+# =============================================================================
+# Hardware pak: Elecrow CrowPanel 5.0" HMI ESP32 display - 800x480 RGB panel, GT911
+# touch, ESP32-S3-WROOM-1-N4R8 (4 MB flash, 8 MB PSRAM).
+#
+# Included from the main config:
+#   packages:
+#     display_hw: !include pak/zz_be_mon_hw_elecrow_crowpanel_5.yaml
+# NOT RUN ON THE BOARD. Written from the esphome-devices entry "Elecrow 5inch ESP32
+# display" (the original CrowPanel 5.0", not the newer "V3" hardware revisions).
+#
+# What a pak provides: see zz_be_mon_hw_template.yaml
+# =============================================================================
+
+substitutions:
+  disp_w: 800
+  disp_h: 480
+  disp_rot: 0
+
+esphome:
+  platformio_options:
+    board_build.esp-idf.memory_type: qio_opi
+    board_build.flash_mode: dio
+
+esp32:
+  variant: esp32s3
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: y
+      CONFIG_ESP32S3_DATA_CACHE_64KB: y
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: y
+      CONFIG_SPIRAM_RODATA: y
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+i2c:
+  sda: GPIO19
+  scl: GPIO20
+
+output:
+  - platform: ledc
+    id: gpio_backlight_pwm
+    pin: 2
+    frequency: 1220
+
+display:
+  - platform: rpi_dpi_rgb
+    id: my_display
+    color_order: RGB
+    invert_colors: true
+    update_interval: never
+    auto_clear_enabled: false
+    dimensions:
+      width: ${disp_w}
+      height: ${disp_h}
+    de_pin: 40
+    hsync_pin: 39
+    vsync_pin: 41
+    pclk_pin: 0
+    pclk_frequency: 12MHz
+    data_pins:
+      red:
+        - 45 #r1
+        - 48 #r2
+        - 47 #r3
+        - 21 #r4
+        - 14 #r5
+      green:
+        - 5 #g0
+        - 6 #g1
+        - 7 #g2
+        - 15 #g3
+        - 16 #g4
+        - 4 #g5
+      blue:
+        - 8 #b1
+        - 3 #b2
+        - 46 #b3
+        - 9 #b4
+        - 1 #b5
+
+touchscreen:
+  - platform: gt911
+    id: my_touch
+    display: my_display
+    update_interval: 16ms      # LVGL detects swipes from successive samples: poll fast
+    on_release:
+      - script.execute: wake_ui
+
+lvgl:
+  displays:
+    - my_display
+  touchscreens:
+    - my_touch
+  buffer_size: 25%

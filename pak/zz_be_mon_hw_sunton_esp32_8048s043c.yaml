@@ -1,0 +1,95 @@
+# =============================================================================
+# Hardware pak: Sunton ESP32-8048S043C - 4.3" 800x480 RGB panel, GT911 touch,
+# ESP32-S3 with 16 MB flash and 8 MB PSRAM.
+#
+# Included from the main config:
+#   packages:
+#     display_hw: !include pak/zz_be_mon_hw_sunton_esp32_8048s043c.yaml
+# NOT RUN ON THE BOARD. Written from the esphome-devices entry "Sunton-ESP32-8048S043C".
+# That entry does not name the touch controller's interrupt / reset pins, so neither does
+# this one (the GT911 is found on the I2C bus).
+#
+# What a pak provides: see zz_be_mon_hw_template.yaml
+# =============================================================================
+
+substitutions:
+  disp_w: 800
+  disp_h: 480
+  disp_rot: 0
+
+esphome:
+  platformio_options:
+    board_build.flash_mode: dio
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      COMPILER_OPTIMIZATION_SIZE: y
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
+      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
+      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: y
+      CONFIG_SPIRAM_RODATA: y
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+i2c:
+  - id: bus_a
+    scl: GPIO20
+    sda: GPIO19
+
+output:
+  - platform: ledc
+    id: gpio_backlight_pwm
+    pin: GPIO2
+
+display:
+  - platform: rpi_dpi_rgb
+    id: my_display
+    dimensions:
+      width: ${disp_w}
+      height: ${disp_h}
+    color_order: RGB
+    de_pin: 40
+    hsync_pin: 39
+    vsync_pin: 41
+    pclk_pin: 42
+    pclk_inverted: true
+    pclk_frequency: 16MHz
+    hsync_front_porch: 8
+    hsync_pulse_width: 4
+    hsync_back_porch: 8
+    vsync_front_porch: 8
+    vsync_pulse_width: 4
+    vsync_back_porch: 8
+    data_pins:
+      red: [45, 48, 47, 21, 14]
+      green: [5, 6, 7, 15, 16, 4]
+      blue: [8, 3, 46, 9, 1]
+    update_interval: never
+    auto_clear_enabled: false
+
+touchscreen:
+  - platform: gt911
+    id: my_touch
+    i2c_id: bus_a
+    display: my_display
+    update_interval: 16ms      # LVGL detects swipes from successive samples: poll fast
+    transform:
+      mirror_x: false
+      mirror_y: false
+    on_release:
+      - script.execute: wake_ui
+
+lvgl:
+  displays:
+    - my_display
+  touchscreens:
+    - my_touch
+  buffer_size: 25%

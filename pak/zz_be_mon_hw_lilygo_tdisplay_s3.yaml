@@ -1,0 +1,99 @@
+# =============================================================================
+# Hardware pak: LILYGO T-Display-S3 (version WITHOUT touch) - 1.9" 170x320 ST7789 panel
+# on an 8-bit parallel bus, ESP32-S3 with 16 MB flash and 8 MB PSRAM. Used as a 320x170
+# landscape screen.
+#
+# Included from the main config:
+#   packages:
+#     display_hw: !include pak/zz_be_mon_hw_lilygo_tdisplay_s3.yaml
+# NOT RUN ON THE BOARD. Written from the esphome-devices entry "Lilygo TDisplay S3" and
+# ESPHome's built-in `t-display-s3` model.
+#
+# There is no touch, so the two buttons do the paging: BOOT (GPIO0) shows the next page,
+# the other one (GPIO14) the previous page. A press while the screen sleeps only wakes it.
+# What needs a tap - switching the emulator on SYSTEM, the menu buttons, the cell chart -
+# is out of reach; the emulator chosen last time (or the first one configured) is watched.
+# The panel is a portrait one: `lvgl: rotation` (270 or 90) makes it landscape, and
+# disp_rot has to say the same. A very small screen: the interface is scaled down to fit.
+#
+# What a pak provides: see zz_be_mon_hw_template.yaml
+# =============================================================================
+
+substitutions:
+  disp_w: 170              # the panel as its driver reports it ...
+  disp_h: 320
+  disp_rot: 270            # ... and the rotation that makes the UI 320x170 landscape
+
+esp32:
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+spi:
+  type: octal
+  clk_pin: 8
+  data_pins:
+    - 39
+    - 40
+    - 41
+    - 42
+    - ignore_strapping_warning: true
+      number: 45
+    - ignore_strapping_warning: true
+      number: 46
+    - 47
+    - 48
+
+output:
+  - platform: ledc
+    id: gpio_backlight_pwm
+    pin: GPIO38
+    frequency: 2000
+
+display:
+  - platform: mipi_spi
+    id: my_display
+    model: t-display-s3
+    update_interval: never
+    auto_clear_enabled: false
+
+binary_sensor:
+  - platform: gpio
+    id: btn_next
+    pin:
+      number: GPIO0
+      inverted: true
+    on_press:
+      - if:
+          condition: lvgl.is_paused
+          then:
+            - script.execute: wake_ui
+          else:
+            - lvgl.page.next:
+                animation: MOVE_LEFT
+                time: 250ms
+  - platform: gpio
+    id: btn_prev
+    pin:
+      number: GPIO14
+      inverted: true
+    on_press:
+      - if:
+          condition: lvgl.is_paused
+          then:
+            - script.execute: wake_ui
+          else:
+            - lvgl.page.previous:
+                animation: MOVE_RIGHT
+                time: 250ms
+
+lvgl:
+  displays:
+    - my_display
+  buffer_size: 100%
+  rotation: 270

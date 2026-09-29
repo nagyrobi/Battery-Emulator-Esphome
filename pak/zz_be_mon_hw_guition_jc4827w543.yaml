@@ -1,0 +1,81 @@
+# =============================================================================
+# Hardware pak: Guition JC4827W543(C) - 4.3" 480x272, NV3041A QSPI panel, GT911 touch,
+# ESP32-S3 with 4 MB flash and 8 MB PSRAM.
+#
+# Included from the main config:
+#   packages:
+#     display_hw: !include pak/zz_be_mon_hw_guition_jc4827w543.yaml
+# NOT RUN ON THE BOARD. Written from the esphome-devices entry "Guition JC4827543C" and
+# ESPHome's built-in `JC4827W543` model (which carries the panel's init sequence).
+# If the picture is upside down, set `lvgl: rotation: 180` and disp_rot: 180 (the touch
+# below is already mirrored on both axes, as in that entry).
+#
+# What a pak provides: see zz_be_mon_hw_template.yaml
+# =============================================================================
+
+substitutions:
+  disp_w: 480
+  disp_h: 272
+  disp_rot: 0
+
+esphome:
+  platformio_options:
+    board_build.flash_mode: dio
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 4MB
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+spi:
+  id: quad_spi
+  type: quad
+  clk_pin: GPIO47
+  data_pins: [21, 48, 40, 39]
+
+i2c:
+  - id: bus_a
+    sda: GPIO8
+    scl: GPIO4
+
+output:
+  - platform: ledc
+    id: gpio_backlight_pwm
+    pin: GPIO1
+    frequency: 1000Hz
+
+display:
+  - platform: mipi_spi
+    id: my_display
+    model: JC4827W543
+    update_interval: never
+    auto_clear_enabled: false
+
+touchscreen:
+  - platform: gt911
+    id: my_touch
+    i2c_id: bus_a
+    display: my_display
+    update_interval: 16ms      # LVGL detects swipes from successive samples: poll fast
+    interrupt_pin:
+      number: GPIO3
+      ignore_strapping_warning: true
+    reset_pin: GPIO38
+    transform:
+      mirror_x: true
+      mirror_y: true
+    on_release:
+      - script.execute: wake_ui
+
+lvgl:
+  displays:
+    - my_display
+  touchscreens:
+    - my_touch
+  buffer_size: 25%             # the QSPI panel is flushed in slices

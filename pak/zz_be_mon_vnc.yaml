@@ -1,0 +1,40 @@
+# =============================================================================
+# Optional package: the screen over VNC (mirrors what the panel shows; a click in the
+# viewer arrives as a touch). Use any VNC client on port 5900 with the password from
+# secrets.yaml (`vnc_password`).
+#
+# It keeps a copy of the frame in RAM - width x height x 2 bytes, so 460 kB at 480x480 -
+# which is why it wants PSRAM. Boards without PSRAM comment the `vnc` line out in the
+# main config.
+#
+# The VNC display has to be the size of the panel as its driver reports it, which is what
+# the hardware pak states in disp_w / disp_h (whatever LVGL's rotation makes of it).
+# =============================================================================
+
+external_components:
+  - source: github://nagyrobi/esphome-components
+    refresh: 60min
+    components: [ vnc ]
+
+display:
+  - platform: vnc
+    id: vnc_display
+    password: !secret vnc_password
+    dimensions:
+      width: ${disp_w}
+      height: ${disp_h}
+    on_connect:
+      - script.execute: wake_ui
+
+touchscreen:
+  - platform: vnc
+    id: vnc_touch
+    display: vnc_display
+    on_release:
+      - script.execute: wake_ui
+
+lvgl:
+  displays:
+    - vnc_display
+  touchscreens:
+    - vnc_touch

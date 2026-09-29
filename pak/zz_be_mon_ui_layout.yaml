@@ -135,16 +135,18 @@ substitutions:
   sys_emu_rows: ${ [sh_h] + [sr_h] * 12 + [sn_h] + [sr_h] * 5 }
   sys_disp_rows: ${ [sh_h, 'FR(4)'] + ['FR(3)'] * 6 }
   # Text sizes at ui_f (Inter for the reference's Inter faces, Montserrat for its Montserrat).
-  fs_cap: ${ (14 * ui_f) | round | int }
-  fs_txt: ${ (16 * ui_f) | round | int }
-  fs_val: ${ (18 * ui_f) | round | int }
+  # Body text never goes below 7 px: on the smallest screens (320x170) it is the limit of
+  # what can be read, and the blocks are made to fit that.
+  fs_cap: ${ [((14) * ui_f) | round | int, 7] | max }
+  fs_txt: ${ [((16) * ui_f) | round | int, 7] | max }
+  fs_val: ${ [((18) * ui_f) | round | int, 7] | max }
   fs_ttl: ${ (32 * ui_f) | round | int }
   fs_soc: ${ ((48, 28)[ui_wide] * ui_k) | round | int }
   fs_volt: ${ ((32, 22)[ui_wide] * ui_k) | round | int }
   fs_big: ${ (48 * ui_f) | round | int }
-  fs_hint: ${ (12 * ui_f) | round | int }
-  fs_s: ${ (14 * ui_f) | round | int }
-  fs_m: ${ (16 * ui_f) | round | int }
-  fs_l: ${ (18 * ui_f) | round | int }
-  fs_xl: ${ (20 * ui_f) | round | int }
+  fs_hint: ${ [((12) * ui_f) | round | int, 7] | max }
+  fs_s: ${ [((14) * ui_f) | round | int, 7] | max }
+  fs_m: ${ [((16) * ui_f) | round | int, 7] | max }
+  fs_l: ${ [((18) * ui_f) | round | int, 7] | max }
+  fs_xl: ${ [((20) * ui_f) | round | int, 7] | max }
   fs_temp: ${ (40 * ui_f) | round | int }

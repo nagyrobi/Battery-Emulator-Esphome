@@ -1,5 +1,6 @@
 # =============================================================================
-# Battery-Emulator ESP-NOW monitor - for the Guition ESP32-S3 touch displays
+# Battery-Emulator ESP-NOW monitor - for ESP32 / ESP32-S3 displays (Guition, Sunton, Elecrow,
+# LILYGO, CYD ...)
 #
 # Hardware: one line under `packages:` below picks the pak for your display (pak/zz_be_mon_hw_*).
 #           A pak holds everything that is specific to the board: chip setup, buses,
@@ -92,11 +93,6 @@ substitutions:
   c_arc_bg: "253241"       # SOC arc track
   c_bar: "214BFF"          # cell bar
 
-external_components:
-  - source: github://nagyrobi/esphome-components
-    refresh: 60min
-    components: [ vnc ]
-
 # Settings kept across reboots (the watched emulator, the backlight level) reach flash
 # within this time. The default is a minute; a panel that gets unplugged right after a
 # change should not lose it.
@@ -157,24 +153,44 @@ api:
   encryption:
     key: !secret encryption_key
 
-# --- Hardware --------------------------------------------------------------------
+# --- Hardware and remote view ------------------------------------------------------
 # Everything that depends on the board and its display lives in pak/. Keep exactly ONE
-# of these lines uncommented; the file for the display you have provides
+# `display_hw` line uncommented; the file for the display you have provides
 #   substitutions  disp_w / disp_h / disp_rot   panel size as the driver reports it and
 #                                               the LVGL rotation (landscape for wide panels)
 #   esp32, psram and the buses
 #   output         gpio_backlight_pwm           built into the `display_backlight` light below
 #   display        my_display
-#   touchscreen    my_touch
-#   lvgl           buffer_size (and rotation)
+#   touchscreen    my_touch, whose on_release runs the script `wake_ui`
+#                  (a board without touch runs it from its buttons instead)
+#   lvgl           displays, touchscreens, buffer_size (and rotation)
 # The user interface sizes itself from the resulting screen size. To add a display, copy
 # pak/zz_be_mon_hw_template.yaml.
+#
+# Packages are read bottom to top, which decides two things:
+#  - the layout tokens are worked out from what the hardware pak states, so `ui_layout` has
+#    to stay ABOVE it;
+#  - the lists they add to (LVGL's displays) are in the order the packages are written,
+#    and the panel has to be LVGL's first display, so `vnc` stays BELOW the hardware.
 packages:
-  # The screen-size tokens are worked out from what the hardware pak states, so this one
-  # has to stay ABOVE it: ESPHome reads the packages bottom to top.
   ui_layout: !include pak/zz_be_mon_ui_layout.yaml
-  display_hw: !include pak/zz_be_mon_hw_guition_4848s040.yaml
-  # display_hw: !include pak/zz_be_mon_hw_guition_jc3248w535.yaml
+  # ---- the board: exactly one of these ----------------------------------------------
+  # ESP32-S3 with PSRAM
+  display_hw: !include pak/zz_be_mon_hw_guition_4848s040.yaml           # 480x480  ST7701S RGB, GT911
+  # display_hw: !include pak/zz_be_mon_hw_guition_jc3248w535.yaml       # 480x320  AXS15231 QSPI (portrait panel, rotated), AXS15231 touch
+  # display_hw: !include pak/zz_be_mon_hw_guition_jc4827w543.yaml       # 480x272  NV3041A QSPI, GT911
+  # display_hw: !include pak/zz_be_mon_hw_sunton_esp32_8048s043c.yaml   # 800x480  RGB, GT911
+  # display_hw: !include pak/zz_be_mon_hw_elecrow_crowpanel_5.yaml      # 800x480  RGB, GT911
+  # display_hw: !include pak/zz_be_mon_hw_tuya_t3e.yaml                 # 480x480  ST7701S RGB, GT911
+  # display_hw: !include pak/zz_be_mon_hw_lilygo_tdisplay_s3_touch.yaml # 320x170  ST7789 (rotated), CST816 touch
+  # display_hw: !include pak/zz_be_mon_hw_lilygo_tdisplay_s3.yaml       # 320x170  ST7789 (rotated), no touch: the two buttons page through
+  # ESP32 without PSRAM: comment `vnc` out as well
+  # display_hw: !include pak/zz_be_mon_hw_esp32_2432s028r.yaml          # 320x240  ILI9341, XPT2046 (the "Cheap Yellow Display")
+  # ---- optional ---------------------------------------------------------------------
+  # Mirrors the screen to a VNC client, which can also click through it. Keeps a copy of
+  # the frame (width x height x 2 bytes) in RAM, so it wants PSRAM, and needs
+  # `vnc_password` in secrets.yaml. Comment it out on a board without PSRAM.
+  vnc: !include pak/zz_be_mon_vnc.yaml
 
 light:
   - id: display_backlight
@@ -183,47 +199,6 @@ light:
     output: gpio_backlight_pwm
     restore_mode: ALWAYS_ON
     default_transition_length: 500ms
-
-display:
-  # The panel (my_display) is in the pak. This one mirrors the UI to a VNC client and
-  # has to be the panel's size as the driver reports it.
-  - platform: vnc
-    id: vnc_display
-    password: !secret vnc_password
-    dimensions:
-      width: ${disp_w}
-      height: ${disp_h}
-    on_connect:
-      - if:
-          condition: lvgl.is_paused
-          then:
-            - lvgl.resume:
-            - lvgl.widget.redraw:
-            - script.execute: render_events
-            - script.execute: wake_backlight
-
-touchscreen:
-  # The touch controller (my_touch) is in the pak; what a touch does is decided here.
-  - id: !extend my_touch
-    on_release:
-      - if:
-          condition: lvgl.is_paused
-          then:
-            - lvgl.resume:
-            - lvgl.widget.redraw:
-            - script.execute: render_events
-            - script.execute: wake_backlight
-  - platform: vnc
-    id: vnc_touch
-    display: vnc_display
-    on_release:
-      - if:
-          condition: lvgl.is_paused
-          then:
-            - lvgl.resume:
-            - lvgl.widget.redraw:
-            - script.execute: render_events
-            - script.execute: wake_backlight
 
 # --- Typography of the reference design ----------------------------------------
 # The reference ships Inter Medium 14/16/18 for text and Inter Display SemiBold 32/48
@@ -1723,6 +1698,18 @@ script:
       - delay: 4s
       - lvgl.widget.hide: v_toast
 
+  # A touch (or a button, or a VNC client) after the screen went to sleep: draw again and
+  # switch the backlight on. Called by the hardware and VNC packages.
+  - id: wake_ui
+    then:
+      - if:
+          condition: lvgl.is_paused
+          then:
+            - lvgl.resume:
+            - lvgl.widget.redraw:
+            - script.execute: render_events
+            - script.execute: wake_backlight
+
   # Backlight back on after sleep, at the level stored by the SYSTEM > Display slider.
   - id: wake_backlight
     mode: restart
@@ -1732,14 +1719,19 @@ script:
           transition_length: 300ms
           brightness: !lambda 'return std::isnan(id(bl_level).state) ? 1.0f : id(bl_level).state / 100.0f;'
 
-  # SYSTEM > Display "FREE HEAP": internal RAM, plus PSRAM once that has reported.
+  # SYSTEM > Display "FREE HEAP": internal RAM, plus PSRAM on a board that has any.
   - id: render_heap
     then:
       - lvgl.label.update:
           id: v_dheap
           text: !lambda |-
-            const float f = id(dsp_free).state, p = id(dsp_psram).state;
+            const float f = id(dsp_free).state;
             if (std::isnan(f)) return std::string("--");
+            float p = NAN;
+            #ifdef USE_ESP32
+            const size_t sp = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+            if (sp > 0) p = (float) sp;
+            #endif
             char b[40];
             if (std::isnan(p))
               snprintf(b, sizeof(b), "%.1f kB", f / 1024.0f);
@@ -1886,9 +1878,6 @@ sensor:
     free:
       id: dsp_free
       on_value: [ script.execute: render_heap ]
-    psram:
-      id: dsp_psram
-      on_value: [ script.execute: render_heap ]
 
 # Backlight level, set with the slider on SYSTEM > Display. Stored in flash and restored
 # at boot; the slider itself stops at 90 %.
@@ -1916,13 +1905,9 @@ number:
 
 # --- LVGL: the reference design ------------------------------------------------
 lvgl:
-  displays:
-    - my_display
-    - vnc_display
-  touchscreens:
-    - my_touch
-    - vnc_touch
-  # buffer_size and rotation come from the hardware pak.
+  # The displays and touchscreens LVGL draws on and listens to (the panel and its touch
+  # controller; VNC's, when included), the buffer size and the rotation come from the
+  # packages.
   color_depth: 16
   default_font: f_txt
   bottom_layer:

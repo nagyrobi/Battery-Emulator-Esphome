@@ -1,0 +1,106 @@
+# =============================================================================
+# Hardware pak: TuYa T3E "ESP32 480x480 Smart Screen" - 480x480 ST7701S RGB panel, GT911
+# touch, ESP32-S3 (PSRAM), three relays and a Zigbee module on the same PCB.
+#
+# Included from the main config:
+#   packages:
+#     display_hw: !include pak/zz_be_mon_hw_tuya_t3e.yaml
+# NOT RUN ON THE BOARD. Written from the esphome-devices entry "TuYa T3E - ESP32 480*480
+# Smart Screen". The relays and the Zigbee module are not used here.
+# Mounted with the USB socket facing down: set `lvgl: rotation: 270` and disp_rot: 270 and
+# use the touch `transform` given in that entry (swap_xy + mirror_x).
+#
+# What a pak provides: see zz_be_mon_hw_template.yaml
+# =============================================================================
+
+substitutions:
+  disp_w: 480
+  disp_h: 480
+  disp_rot: 0
+
+esp32:
+  variant: esp32s3
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+spi:
+  - id: lcd_spi
+    clk_pin:
+      number: GPIO15
+      allow_other_uses: true
+    mosi_pin:
+      number: GPIO48
+      allow_other_uses: true
+
+i2c:
+  id: touchscreen_bus
+  sda: GPIO7
+  scl: GPIO6
+
+output:
+  - platform: ledc
+    id: gpio_backlight_pwm
+    pin: GPIO42
+    frequency: 1000Hz
+    zero_means_zero: true
+
+display:
+  - platform: st7701s
+    id: my_display
+    dimensions:
+      width: ${disp_w}
+      height: ${disp_h}
+    update_interval: never
+    auto_clear_enabled: false
+    spi_mode: MODE3
+    data_rate: 2MHz
+    color_order: RGB
+    invert_colors: true
+    cs_pin:
+      number: GPIO4
+      allow_other_uses: true
+    data_pins:
+      red:   [GPIO8, GPIO18, GPIO17, GPIO16, GPIO0]
+      green: [GPIO13, GPIO12, GPIO11, GPIO10, GPIO9, GPIO3]
+      blue:
+        - number: GPIO15
+          allow_other_uses: true
+        - number: GPIO48
+          allow_other_uses: true
+        - GPIO47
+        - GPIO21
+        - GPIO14
+    de_pin: GPIO40
+    vsync_pin: GPIO39
+    hsync_pin: GPIO38
+    pclk_pin: GPIO41
+    pclk_inverted: false
+    hsync_pulse_width: 8
+    hsync_front_porch: 10
+    hsync_back_porch: 50
+    vsync_pulse_width: 8
+    vsync_front_porch: 10
+    vsync_back_porch: 20
+    pclk_frequency: 12MHz
+    reset_pin:
+      number: GPIO4
+      allow_other_uses: true
+
+touchscreen:
+  - platform: gt911
+    id: my_touch
+    display: my_display
+    update_interval: 16ms      # LVGL detects swipes from successive samples: poll fast
+    on_release:
+      - script.execute: wake_ui
+
+lvgl:
+  displays:
+    - my_display
+  touchscreens:
+    - my_touch
+  buffer_size: 100%            # the RGB panel has PSRAM to spare: render whole frames

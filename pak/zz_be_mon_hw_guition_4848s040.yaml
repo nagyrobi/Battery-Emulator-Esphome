@@ -3,18 +3,10 @@
 #
 # Included from the main config:
 #   packages:
-#     display_hw: !include pak/zz_hw_guition_4848s040.yaml
+#     display_hw: !include pak/zz_be_mon_hw_guition_4848s040.yaml
 # Verified on the real board.
 #
-# What a pak provides (see zz_hw_template.yaml):
-#   substitutions  disp_w / disp_h / disp_rot   the panel as its driver reports it, and
-#                                               the LVGL rotation (0 / 90 / 180 / 270)
-#   esp32, psram, buses
-#   output         id: gpio_backlight_pwm       the backlight (the main config builds the
-#                                               light on it)
-#   display        id: my_display
-#   touchscreen    id: my_touch
-#   lvgl           buffer_size (and rotation, when disp_rot is not 0)
+# What a pak provides: see zz_be_mon_hw_template.yaml
 # =============================================================================
 
 substitutions:
@@ -108,7 +100,13 @@ touchscreen:
     transform:
       mirror_x: false
       mirror_y: false
+    on_release:
+      - script.execute: wake_ui
 
 lvgl:
+  displays:
+    - my_display
+  touchscreens:
+    - my_touch
   buffer_size: 100%          # the RGB panel has PSRAM to spare: render whole frames
   # rotation: 270            # only if the panel is mounted turned; then set disp_rot to match

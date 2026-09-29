@@ -1,0 +1,91 @@
+# =============================================================================
+# Hardware pak: ESP32-2432S028R, the "Cheap Yellow Display" (CYD) - 2.8" 240x320 ILI9341
+# panel, XPT2046 resistive touch, plain ESP32 (no PSRAM). Used as a 320x240 landscape
+# screen.
+#
+# Included from the main config:
+#   packages:
+#     display_hw: !include pak/zz_be_mon_hw_esp32_2432s028r.yaml
+# and comment the `vnc` package out: it keeps a copy of the frame in RAM.
+# NOT RUN ON THE BOARD. This board is not in the esphome-devices collection; the pins are
+# the ones of the common CYD pinout: the panel on SPI CLK 14 / MOSI 13 / MISO 12 with CS 15,
+# DC 2 and the backlight on GPIO21, the touch controller on its own bus (CLK 25 / MOSI 32 /
+# MISO 39) with CS 33 and IRQ 36. Things that differ between board batches:
+#   - the "two USB ports" batch has an ST7789 panel instead: use `model: ST7789V` with
+#     `invert_colors: true`;
+#   - the colours can come out swapped: add `color_order: RGB` (or BGR) to the display;
+#   - the backlight is on GPIO27 on some batches;
+#   - the touch axes and the calibration below are the usual ones; if taps land mirrored,
+#     change `transform`, if they are offset, `calibration`.
+# The panel is a portrait one: `lvgl: rotation` (90 or 270) makes it landscape, and
+# disp_rot has to say the same. 320x240 is small: expect small print.
+#
+# What a pak provides: see zz_be_mon_hw_template.yaml
+# =============================================================================
+
+substitutions:
+  disp_w: 240              # the panel as its driver reports it ...
+  disp_h: 320
+  disp_rot: 90             # ... and the rotation that makes the UI 320x240 landscape
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+spi:
+  - id: tft_spi
+    clk_pin: GPIO14
+    mosi_pin: GPIO13
+    miso_pin:
+      number: GPIO12
+      ignore_strapping_warning: true
+  - id: touch_spi
+    clk_pin: GPIO25
+    mosi_pin: GPIO32
+    miso_pin: GPIO39
+
+output:
+  - platform: ledc
+    id: gpio_backlight_pwm
+    pin: GPIO21
+
+display:
+  - platform: mipi_spi
+    id: my_display
+    spi_id: tft_spi
+    model: ILI9341
+    cs_pin:
+      number: GPIO15
+      ignore_strapping_warning: true
+    dc_pin:
+      number: GPIO2
+      ignore_strapping_warning: true
+    data_rate: 40MHz
+    update_interval: never
+    auto_clear_enabled: false
+
+touchscreen:
+  - platform: xpt2046
+    id: my_touch
+    spi_id: touch_spi
+    cs_pin: GPIO33
+    interrupt_pin: GPIO36
+    display: my_display
+    update_interval: 20ms      # LVGL detects swipes from successive samples: poll fast
+    threshold: 400
+    calibration:
+      x_min: 280
+      x_max: 3860
+      y_min: 340
+      y_max: 3860
+    on_release:
+      - script.execute: wake_ui
+
+lvgl:
+  displays:
+    - my_display
+  touchscreens:
+    - my_touch
+  buffer_size: 25%
+  rotation: 90
