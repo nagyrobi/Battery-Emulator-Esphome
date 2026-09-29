@@ -7,7 +7,7 @@ built with [ESPHome's LVGL component](https://esphome.io/components/lvgl/).
 
 You can watch up to 3 independent Battery Emulators at the same time, each supporting even double and triple battery packs.
 
-`be-monitor.yaml` is the config to compile. It needs ESPHome **2026.9.0** or newer.
+`be-monitor.yaml` is the config to compile. It needs ESPHome **2026.9.0** or newer. See [setup](#setup) below.
 
 ## Why [ESPHome](https://esphome.io/)
 
@@ -82,7 +82,6 @@ Swipe left or right (the pages wrap) or tap a page dot.
 4. On the emulator, enable ESP-NOW. Leave "ESPNow receiver MACs" empty (broadcast) or list this
    display's MAC. The display has to be on the same Wi-Fi channel (in practice: the same access
    point).
-5. The fonts come from Google Fonts at build time, so the first compile needs internet access.
 
 The emulator you pick on SYSTEM (or with NEXT EMULATOR) is remembered across restarts.
 
