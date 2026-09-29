@@ -19,7 +19,7 @@
 #   - the XPT2046 sits on the same SPI bus as the panel (CLK 14 / MOSI 13 / MISO 12), chip
 #     select 33, no interrupt line used;
 #   - the backlight is on GPIO27.
-# The board's RGB LED (GPIO4 / 16 / 17, inverted) and the light sensor (GPIO34) are not used.
+# The board's light sensor (GPIO34) is not used.
 # If taps land mirrored, change `transform`; if they are offset, `calibration`. If the colours
 # are swapped, flip `color_order` (RGB / BGR); if the picture is mirrored, `transform` on the
 # display. 320x240 is small: expect small print.
@@ -49,13 +49,41 @@ output:
   - platform: ledc
     id: gpio_backlight_pwm
     pin: GPIO27
+  - platform: ledc
+    id: output_red
+    pin: GPIO4
+    inverted: true
+  - platform: ledc
+    id: output_green
+    pin: GPIO17
+    inverted: true
+  - platform: ledc
+    id: output_blue
+    pin: GPIO16
+    inverted: true
 
+light:
+  - platform: rgb
+    name: LED pixel
+    id: led
+    red: output_red
+    green: output_green
+    blue: output_blue
+    restore_mode: ALWAYS_OFF
+    
 display:
   - platform: mipi_spi
     id: my_display
     spi_id: tft_spi
-    model: ILI9342
-    color_order: RGB
+    model: ST7789V
+    transform:
+      swap_xy: true
+      mirror_x: true
+      mirror_y: false
+    dimensions:
+      height: 240
+      width: 320
+    color_order: BGR
     invert_colors: false
     cs_pin:
       number: GPIO15
@@ -81,8 +109,8 @@ touchscreen:
       y_max: 3860
     transform:
       swap_xy: false
-      mirror_x: true
-      mirror_y: true
+      mirror_x: false
+      mirror_y: false
     on_release:
       - script.execute: wake_ui
 
