@@ -7,6 +7,18 @@ built with ESPHome's LVGL component.
 
 `be-monitor.yaml` is the config to compile. It needs ESPHome **2026.9.0** or newer.
 
+## Why ESPHome
+
+* **Any display:** a board is one small YAML file in `pak/`; ESPHome has drivers for most panels and
+  touch controllers, and LVGL draws the same interface on all of them.
+* **A lot of components:** add sensors, relays, MQTT, Bluetooth or anything else from the ESPHome
+  catalogue to the same YAML; the device also appears in Home Assistant through the native API.
+* **Web UI and OTA:** the device serves its own web page (port 80) and takes firmware updates over
+  Wi-Fi, from a browser or the ESPHome dashboard.
+* **Your own build, your own security:** you compile the YAML yourself, from source you can read,
+  with your own Wi-Fi credentials and keys (encrypted API, OTA password): no vendor firmware and
+  no cloud account.
+
 480x320:
 ![480x320](screenshots/overview_480x320.png)
 
@@ -29,6 +41,15 @@ Pages, each one stacked as title bar, blocks that share the remaining height, an
 | SYSTEM | One button per configured emulator picks the one being watched and shows its diagnostics; **Display** shows this panel: backlight slider (kept across restarts), MAC, SSID, signal, IP, uptime, free heap. |
 
 Swipe left or right (the pages wrap) or tap a page dot.
+
+## What it remembers, and what you set
+
+* It watches up to **3 emulators** at the same time (name and MAC each), and you switch between them
+  on SYSTEM or with NEXT EMULATOR. The one you picked is **saved** and watched again after a restart.
+* The **display brightness** (SYSTEM > Display) is saved as well.
+* Everything else - Wi-Fi, keys, the emulators' names and MACs, colours - is **hardcoded in your own
+  YAML**: there is no settings page on the device, you edit the file and flash it again (over the
+  air, once the first flash is done).
 
 ## Setup
 
