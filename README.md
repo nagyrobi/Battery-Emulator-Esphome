@@ -87,10 +87,10 @@ The emulator you pick on SYSTEM (or with NEXT EMULATOR) is remembered across res
 
 ## Displays preconfigured
 
-Only the first two boards have been run. The others are written from the
+The boards marked with ✅ have been run. The others are written from the
 [esphome-devices](https://devices.esphome.io/) entry of the board and ESPHome's built-in display
 models, and check out with `esphome config` and C++ code generation, but nobody has put them on the
-real hardware yet: expect to adjust pins, colour order, touch axes or rotation. The screen size is
+real hardware yet: please test and give feedback. The screen size is
 what the interface is laid out for (all sizes below have been checked in the simulator); text gets
 small below about 3.5".
 
