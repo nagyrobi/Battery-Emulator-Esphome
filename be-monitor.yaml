@@ -187,6 +187,7 @@ packages:
   # display_hw: !include pak/zz_be_mon_hw_lilygo_tdisplay_s3.yaml       # 320x170  ST7789 (rotated), no touch: the two buttons page through
   # ESP32 without PSRAM: comment `vnc` out as well
   # display_hw: !include pak/zz_be_mon_hw_esp32_2432s028r.yaml          # 320x240  ILI9341, XPT2046 (the "Cheap Yellow Display")
+  # display_hw: !include pak/zz_be_mon_hw_esp32_2432s024r.yaml          # 320x240  ILI9341/2 "TFT 2.4R", XPT2046 on the panel's SPI bus (2.4" resistive CYD)
   # ---- optional ---------------------------------------------------------------------
   # Mirrors the screen to a VNC client, which can also click through it. Keeps a copy of
   # the frame (width x height x 2 bytes) in RAM, so it wants PSRAM, and needs

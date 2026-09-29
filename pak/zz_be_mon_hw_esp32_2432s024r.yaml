@@ -1,0 +1,91 @@
+# =============================================================================
+# Hardware pak: the resistive-touch "Cheap Yellow Display" with the 2.4" 320x240 panel
+# (the ESP32-2432S024R pinout: backlight GPIO27, the touch controller on the display's own
+# SPI bus), plain ESP32 (no PSRAM). A landscape screen as it comes: no rotation.
+#
+# Included from the main config:
+#   packages:
+#     display_hw: !include pak/zz_be_mon_hw_esp32_2432s024r.yaml
+# and comment the `vnc` package out: it keeps a copy of the frame in RAM.
+# Taken from a configuration that runs on the board: `ili9xxx` model `TFT 2.4R`, XPT2046 with
+# the calibration and the mirrored axes below. Not run with this interface yet.
+#
+# How it differs from the other CYD pak (zz_be_mon_hw_esp32_2432s028r.yaml):
+#   - the panel is driven as 320x240 (model `TFT 2.4R`), not as a portrait 240x320 one;
+#   - the XPT2046 sits on the same SPI bus as the panel (CLK 14 / MOSI 13 / MISO 12), chip
+#     select 33, no interrupt line used;
+#   - the backlight is on GPIO27.
+# ESPHome marks `ili9xxx` deprecated; it still works and is what runs on this board. Its
+# `mipi_spi` counterpart is `model: ILI9342` with `color_order: RGB` (same 320x240, same MADCTL;
+# its init sequence differs a little): switch to that when ili9xxx goes away, and try it first.
+# The board's RGB LED (GPIO4 / 16 / 17, inverted) and the light sensor (GPIO34) are not used.
+# If taps land mirrored, change `transform`; if they are offset, `calibration`. If the colours
+# are swapped, flip `color_order` (rgb / bgr). 320x240 is small: expect small print.
+#
+# What a pak provides: see zz_be_mon_hw_template.yaml
+# =============================================================================
+
+substitutions:
+  disp_w: 320
+  disp_h: 240
+  disp_rot: 0              # landscape as it comes: no rotation
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+spi:
+  - id: tft_spi            # the panel and the touch controller share this bus
+    clk_pin: GPIO14
+    mosi_pin: GPIO13
+    miso_pin:
+      number: GPIO12
+      ignore_strapping_warning: true
+
+output:
+  - platform: ledc
+    id: gpio_backlight_pwm
+    pin: GPIO27
+
+display:
+  - platform: ili9xxx
+    id: my_display
+    model: TFT 2.4R
+    spi_id: tft_spi
+    color_order: rgb
+    invert_colors: false
+    cs_pin:
+      number: GPIO15
+      ignore_strapping_warning: true
+    dc_pin:
+      number: GPIO2
+      ignore_strapping_warning: true
+    update_interval: never
+    auto_clear_enabled: false
+
+touchscreen:
+  - platform: xpt2046
+    id: my_touch
+    spi_id: tft_spi
+    cs_pin: GPIO33
+    display: my_display
+    update_interval: 20ms      # LVGL detects swipes from successive samples: poll fast
+    calibration:
+      x_min: 280
+      x_max: 3860
+      y_min: 340
+      y_max: 3860
+    transform:
+      swap_xy: false
+      mirror_x: true
+      mirror_y: true
+    on_release:
+      - script.execute: wake_ui
+
+lvgl:
+  displays:
+    - my_display
+  touchscreens:
+    - my_touch
+  buffer_size: 25%
