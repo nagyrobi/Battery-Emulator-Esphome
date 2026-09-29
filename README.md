@@ -56,7 +56,7 @@ Swipe left or right (the pages wrap) or tap a page dot.
 ## Setup
 
 0. [Set up ESPHome](https://esphome.io/install/) first. Unzip the contents of this repo to the `config` dir of ESPHome.
-1. Add a `secrets.yaml` with your `wifi_ssid`, `wifi_password`, `ota_password` and `encryption_key` (and
+1. [Add](https://esphome.io/guides/security_best_practices/#using-secrets-yaml) a `secrets.yaml` with your `wifi_ssid`, `wifi_password`, `ota_password` and `encryption_key` (and
    `vnc_password` with the optional VNC package, see below).
 2. Emulators, at the top of `be-monitor.yaml`: name and STA MAC of up to three
    (`emulator_N_name` / `emulator_N_mac`). Set a MAC to `""` to switch that emulator off: it
