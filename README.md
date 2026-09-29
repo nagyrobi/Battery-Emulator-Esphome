@@ -96,22 +96,17 @@ small below about 3.5".
 
 | Pak (`pak/zz_be_mon_hw_...`) | Board | Screen | Tested |
 |---|---|---|---|
-| `guition_4848s040` | Guition ESP32-S3-4848S040 | 480x480, ST7701S RGB, GT911 | **yes** |
-| `guition_jc3248w535` | Guition JC3248W535 | 320x480 QSPI panel (AXS15231) used as 480x320 landscape (`lvgl: rotation`), AXS15231 touch | **yes** |
-| `guition_jc4827w543` | Guition JC4827W543(C) | 480x272, NV3041A QSPI, GT911 | no |
-| `sunton_esp32_8048s043c` | Sunton ESP32-8048S043C | 800x480 RGB, GT911 | no |
-| `elecrow_crowpanel_5` | Elecrow CrowPanel 5.0" | 800x480 RGB, GT911 | no |
-| `tuya_t3e` | TuYa T3E smart screen | 480x480 ST7701S RGB, GT911 | no |
-| `lilygo_tpanel_s3` | LILYGO T-Panel S3 | 480x480 ST7701S RGB (its init SPI runs through the XL9535 port expander), CST3240 touch (`cst328` platform, I2C 0x1A) | no |
-| `lilygo_tdisplay_s3_touch` | LILYGO T-Display-S3, touch version | 170x320 ST7789 used as 320x170 landscape, CST816 | no |
-| `lilygo_tdisplay_s3` | LILYGO T-Display-S3, no touch | the same; the two buttons page through the screens | no |
-| `esp32_2432s028r` | ESP32-2432S028R "Cheap Yellow Display" (plain ESP32, no PSRAM: comment `vnc` out) | 240x320 ILI9341 used as 320x240 landscape, XPT2046 resistive touch | no |
-| `esp32_2432s024r` | The 2.4" resistive CYD (ESP32-2432S024R pinout; plain ESP32, no PSRAM: comment `vnc` out) | 320x240 ILI9342 (`mipi_spi`) as it comes (no rotation), XPT2046 resistive touch on the panel's SPI bus, backlight GPIO27 | no |
-
-The CYD is not in the esphome-devices collection: its pak uses the pins of the common CYD pinout
-(see the notes at its top for the batch-to-batch differences). On the T-Display-S3 without touch,
-what needs a tap (switching the emulator on SYSTEM, the menu buttons, the cell chart) is out of
-reach; the emulator chosen last time, or the first one configured, is watched.
+| `guition_4848s040` | Guition ESP32-S3-4848S040 | 480x480, ST7701S RGB, GT911 | ✅ |
+| `guition_jc3248w535` | Guition JC3248W535 | 320x480 QSPI panel (AXS15231) used as 480x320 landscape (`lvgl: rotation`), AXS15231 touch | ✅ |
+| `guition_jc4827w543` | Guition JC4827W543(C) | 480x272, NV3041A QSPI, GT911 | ❓ |
+| `sunton_esp32_8048s043c` | Sunton ESP32-8048S043C | 800x480 RGB, GT911 | ❓ |
+| `elecrow_crowpanel_5` | Elecrow CrowPanel 5.0" | 800x480 RGB, GT911 | ❓ |
+| `tuya_t3e` | TuYa T3E smart screen | 480x480 ST7701S RGB, GT911 | ❓ |
+| `lilygo_tpanel_s3` | LILYGO T-Panel S3 | 480x480 ST7701S RGB (its init SPI runs through the XL9535 port expander), CST3240 touch (`cst328` platform, I2C 0x1A) | ❓ |
+| `lilygo_tdisplay_s3_touch` | LILYGO T-Display-S3, touch version | 170x320 ST7789 used as 320x170 landscape, CST816 | ❓ |
+| `lilygo_tdisplay_s3` | LILYGO T-Display-S3, no touch | the same; the two buttons page through the screens | ❓ |
+| `esp32_2432s028r` | ESP32-2432S028R "Cheap Yellow Display" (plain ESP32, no PSRAM: comment `vnc` out) | 240x320 ILI9341 used as 320x240 landscape, XPT2046 resistive touch | ❓ |
+| `esp32_2432s024r` | The 2.4" resistive CYD (ESP32-2432S024R pinout; plain ESP32, no PSRAM: comment `vnc` out) | 320x240 ILI9342 (`mipi_spi`) as it comes (no rotation), XPT2046 resistive touch on the panel's SPI bus, backlight GPIO27 | ✅ |
 
 A pak provides the chip setup (`esp32`, `psram`), the buses, the backlight output
 `gpio_backlight_pwm`, the display `my_display`, the touch controller `my_touch` (whose
