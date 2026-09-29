@@ -3,7 +3,7 @@
 An [ESPHome](https://esphome.io/) touch display for [Battery-Emulator](https://github.com/dalathegreat/Battery-Emulator).
 It listens to the emulator's ESP-NOW telemetry (protocol v2, read-only, no router hop) and shows
 it on various ESP32-based displays, in the look of [sort282-rgb](https://github.com/sort282-rgb/battery-display-esp32-4848s040c),
-built with ESPHome's LVGL component.
+built with [ESPHome's LVGL component](https://esphome.io/components/lvgl/).
 
 You can watch up to 3 independent Battery Emulators at the same time, each supporting even double and triple battery packs.
 
