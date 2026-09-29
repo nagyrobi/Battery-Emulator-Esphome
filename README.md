@@ -7,11 +7,13 @@ built with ESPHome's LVGL component.
 
 `be-monitor_2.yaml` is the config to compile. It needs ESPHome **2026.9.0** or newer.
 
+480x320:
 ![480x320](screenshots/overview_480x320.png)
 
+480x480:
 ![480x480](screenshots/overview_480x480.png)
 
-(The three screens of the [same config](be-monitor_2.yaml), rendered from the ESPHome host build with simulated emulator frames: 480x480, 480x320 and 800x480.)
+(The two screens of the [same config](be-monitor_2.yaml))
 
 Pages, each one stacked as title bar, blocks that share the remaining height, and the page dots:
 
