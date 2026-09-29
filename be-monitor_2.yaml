@@ -1,0 +1,2872 @@
+# =============================================================================
+# Battery-Emulator ESP-NOW monitor — Guition 4848S040 (ST7701S 480x480 + GT911)
+#
+# UI:   the native 480x480 design of sort282-rgb/battery-display-esp32-4848s040c
+#       (v15.9), rebuilt with the ESPHome LVGL component: the same navy card
+#       layout, palette, Inter / Montserrat typography, SOC arc dashboard, per-cell
+#       bar monitor, event cards, page dots with swipe navigation and the blinking
+#       status heartbeat.
+# Data: the Battery-Emulator ESP-NOW v2 TLV protocol (protocol_version 2), received
+#       straight from the emulator - no router hop, no web polling, read-only.
+# Hardware block reused verbatim from nagyrobi/esp32-evse_esphome-lvgl pak/.
+#
+# Protocol summary (see Software/src/devboard/espnow/espnow.h for the full spec):
+#   header 12 B: 'B','E', ver, frame_type, emu_id(u16), battery_id, flags, uptime(u32)
+#   frames:      1 SYSTEM, 2 BATTERY (per pack), 3 CELLS (per pack, chunked),
+#                4 EVENT (one per event, replayed as a batch of the 10 newest),
+#                5 AGGREGATE (every pack rolled into one; only sent with >1 pack)
+#   record:      key(1) tag(1) [len8|len16] value
+#                tag = (type_class << 5) | length_code
+#                length_code <30 = literal length, 30 = u8 follows, 31 = u16 follows
+#   Unknown keys AND unknown type classes are always skippable, because the
+#   length is derivable from the tag alone. Never bail out on an unknown key.
+#
+# Pages - swipe left / right (wraps around), or tap a page dot at the bottom
+#   MAIN          status header (animated battery, flow arrow, direction, emulator
+#                 status), SOC arc + pack voltage, power, current, cell max / min
+#                 (tap either to jump to that cell), cell delta, max temperature.
+#                 An amber bar (red for an error) appears while an event is active.
+#   BATTERIES     one card per pack. Only in the rotation while the emulator
+#                 reports more than one pack; tap a card to open its cells.
+#   CELL MONITOR  every cell of the selected pack as a bar, lowest / highest
+#                 marked, balancing cells capped amber. Tap or drag across the
+#                 bars to read single cells. Tap the title for the next pack.
+#   EVENTS        the emulator's 10 most recent events, newest first.
+#   BATTERY INFO  contactors, BMS, CAN links, SOH, limits, balancing and isolation
+#                 of the selected pack. Tap the title for the next pack.
+#   ENERGY        remaining / total / reported energy, lifetime throughput, limits.
+#   DISPLAY MENU  shortcuts, next emulator, screen off.
+#   SYSTEM        emulator and network diagnostics, emulator selector.
+#
+# With a single pack MAIN and ENERGY follow pack 1. With several they follow the
+# AGGREGATE frame - the installation as the inverter sees it - while the per-pack
+# pages follow the pack picked on CELL MONITOR / BATTERY INFO / BATTERIES.
+#
+# Raw LVGL calls are confined to the TLV decoder and the render_* scripts, which
+# only ever touch widgets declared below - plus the cell chart, which draws its
+# bars straight into the frame from its own draw event instead of being built
+# from one widget per cell.
+#
+# Needs ESPHome 2026.9.0 or newer (LVGL 9.5). Fonts are fetched from Google Fonts
+# at build time, so the first compile needs internet access.
+# =============================================================================
+
+substitutions:
+  device_name: be-monitor-480
+  friendly_name: "Battery Monitor 480"
+  # Name and STA MAC of each emulator this panel can watch. These are the single source
+  # of truth: the mapping, the matrix button labels, the on_click arguments and the espnow
+  # peer list all reference them, so each value is written once. Add a fourth by adding a
+  # pair of substitutions, a mapping entry, a matrix button and a peer.
+  emulator_1_name: "Csokihaz-1"
+  emulator_1_mac: "a4:cb:8f:d7:c6:28"
+  emulator_2_name: "Emulator 2"
+  emulator_2_mac: "A4:CB:8F:D7:28:04"
+  emulator_3_name: "Emulator 3"
+  emulator_3_mac: "A4:CB:8F:D7:22:B8"
+  # Palette of the reference design (ui480.inc U_*() colours), bare RRGGBB so one value
+  # serves YAML styles (0x${c}), lambdas (0x${c}) and label recolor markup (#${c} ..#).
+  c_bg: "02070D"           # screen
+  c_card: "071522"         # card fill
+  c_line: "344D67"         # card border, separators
+  c_blue: "16C9F2"
+  c_green: "63E21A"
+  c_red: "FF332B"
+  c_amber: "FFB000"
+  c_soft_amber: "E89A3C"
+  c_muted: "8DA2B7"        # secondary text
+  c_dot: "40546B"          # inactive page dot
+  c_arc_bg: "253241"       # SOC arc track
+  c_bar: "214BFF"          # cell bar
+
+external_components:
+  - source: github://nagyrobi/esphome-components
+    refresh: 60min
+    components: [ vnc ]
+
+# Button label -> MAC. Keyed by the text on the matrix button, so the labels below are
+# the only place an emulator is named. Looked up at runtime by select_emulator.
+mapping:
+  - id: emulator_macs
+    from: string
+    to: string
+    default_value: "${emulator_1_mac}"
+    entries:
+      "${emulator_1_name}": "${emulator_1_mac}"
+      "${emulator_2_name}": "${emulator_2_mac}"
+      "${emulator_3_name}": "${emulator_3_mac}"
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+  # Built and checked against ESPHome 2026.9.0 (LVGL 9.5.0). Older releases lack parts
+  # of the LVGL schema used here, so fail early with a clear message instead of
+  # halfway through a C++ build.
+  min_version: 2026.9.0
+  on_boot:
+    # Everything decoded depends on which emulator is watched, so adopt the first one
+    # before anything else. Nothing is decoded until this runs, because sel_mac starts
+    # all zeroes and no emulator can send from 00:00:00:00:00:00.
+    priority: -100
+    then:
+      - script.execute:
+          id: page_loaded
+          page: 0
+      # The stored backlight level, whatever order the light and the number came up in.
+      - script.execute: wake_backlight
+      - lvgl.label.update:
+          id: v_bl
+          text: !lambda |-
+            if (std::isnan(id(bl_level).state)) return std::string("BACKLIGHT");
+            return str_sprintf("BACKLIGHT %.0f%%", id(bl_level).state);
+      - lvgl.matrix.button.update:
+          id: emu_b1
+          control:
+            checked: true
+      - script.execute:
+          id: select_emulator
+          name: "${emulator_1_name}"
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+#    sdkconfig_options:
+#      # The S3 display stack leaves little internal RAM for HTTPS OTA checks.
+#      # Allocate mbedTLS buffers from PSRAM so firmware downloads can connect.
+#      CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC: "y"
+#      # Keep the ESP32 task watchdog long enough for display startup while
+#      # remaining compatible with ESPHome 2026.4 and newer.
+#      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "30"
+#      # Keep WiFi startup inside the internal-RAM budget after the RGB display
+#      # and LVGL buffers are initialized.
+#      CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM: "8"
+#      CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: "y"
+#      # The RGB driver already restarts after a genuine DMA underflow. Restarting
+#      # on every VSYNC can instead shift the framebuffer by one bounce-buffer block.
+#      CONFIG_LCD_RGB_RESTART_IN_VSYNC: "n"
+#      CONFIG_LCD_RGB_ISR_IRAM_SAFE: "y"
+#      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
+#      CONFIG_SPIRAM_RODATA: "y"
+
+psram:
+  speed: 80MHz
+  mode: octal
+
+logger:
+  baud_rate: 0
+  level: INFO
+
+wifi:                                     # same AP as the emulator => same channel
+  networks:
+    - ssid: !secret wifi_ssid
+      password: !secret wifi_password
+    - ssid: !secret wifi_ssid_hif
+      password: !secret wifi_password_hif
+  reboot_timeout: 30min
+  enable_btm: true
+  enable_rrm: true
+  power_save_mode: NONE
+
+web_server:
+  port: 80
+
+ota:
+  - platform: web_server
+  - platform: esphome
+    password: !secret ota_password
+
+api:
+  reboot_timeout: 0s
+  encryption:
+    key: !secret encryption_key
+
+# --- 4848S040 hardware (verified) -------------------------------------------
+spi:
+  - id: lcd_spi
+    clk_pin: GPIO48
+    mosi_pin: GPIO47
+
+i2c:
+  id: touchscreen_bus
+  sda: GPIO19
+  scl: { number: 45, ignore_strapping_warning: true }
+
+output:
+  - platform: ledc
+    id: gpio_backlight_pwm
+    pin: GPIO38
+    frequency: 150Hz
+    min_power: 0.01
+    zero_means_zero: true
+
+light:
+  - id: display_backlight
+    name: Backlight
+    platform: monochromatic
+    output: gpio_backlight_pwm
+    restore_mode: ALWAYS_ON
+    default_transition_length: 500ms
+
+display:
+  - platform: st7701s
+    id: my_display
+    dimensions:
+      width: 480
+      height: 480
+    spi_mode: MODE3
+    data_rate: 2MHz
+    color_order: RGB
+    invert_colors: False
+    cs_pin: 39
+    de_pin: 18
+    hsync_pin: 16
+    vsync_pin: 17
+    pclk_pin: 21
+    pclk_frequency: 12MHz
+    pclk_inverted: False
+    hsync_pulse_width: 8
+    hsync_front_porch: 10
+    hsync_back_porch: 20
+    vsync_pulse_width: 8
+    vsync_front_porch: 10
+    vsync_back_porch: 10
+    update_interval: never
+    auto_clear_enabled: False
+    init_sequence:
+      - 1
+      - [0xFF, 0x77, 0x01, 0x00, 0x00, 0x10] # CMD2_BKSEL_BK0
+      - [0xCD, 0x00] # disable MDT flag
+    data_pins:
+      red: [11, 12, 13, 14, 0]
+      green: [8, 20, 3, 46, 9, 10]
+      blue: [4, 5, 6, 7, 15]
+  - platform: vnc
+    id: vnc_display
+    password: !secret vnc_password
+    dimensions:
+      width: 480
+      height: 480
+    on_connect:
+      - if:
+          condition: lvgl.is_paused
+          then:
+            - lvgl.resume:
+            - lvgl.widget.redraw:
+            - script.execute: render_events
+            - script.execute: wake_backlight
+
+touchscreen:
+  - platform: gt911
+    id: my_touch
+    display: my_display
+    update_interval: 16ms
+    transform:
+      mirror_x: false
+      mirror_y: false
+    on_release:
+      - if:
+          condition: lvgl.is_paused
+          then:
+            - lvgl.resume:
+            - lvgl.widget.redraw:
+            - script.execute: render_events
+            - script.execute: wake_backlight
+  - platform: vnc
+    id: vnc_touch
+    display: vnc_display
+    on_release:
+      - if:
+          condition: lvgl.is_paused
+          then:
+            - lvgl.resume:
+            - lvgl.widget.redraw:
+            - script.execute: render_events
+            - script.execute: wake_backlight
+
+# --- Typography of the reference design ----------------------------------------
+# The reference ships Inter Medium 14/16/18 for text and Inter Display SemiBold 32/48
+# for the big readings. Google Fonts has no static Inter Display, and Inter Tight
+# SemiBold is its near-identical twin (same tightened spacing), so that stands in for
+# it. The Montserrat sizes the reference also uses are LVGL built-ins (montserrat_NN).
+# Glyphs: printable ASCII plus degree, middle dot and the delta of "Δ 12 mV".
+font:
+  - file: "gfonts://Inter@500"
+    id: inter_14
+    size: 14
+    bpp: 4
+    glyphs: &ui_glyphs
+      - ' !"#$%&''()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~°·Δ'
+  - file: "gfonts://Inter@500"
+    id: inter_16
+    size: 16
+    bpp: 4
+    glyphs: *ui_glyphs
+  - file: "gfonts://Inter@500"
+    id: inter_18
+    size: 18
+    bpp: 4
+    glyphs: *ui_glyphs
+  - file: "gfonts://Inter Tight@600"
+    id: inter_d32
+    size: 32
+    bpp: 4
+    glyphs: *ui_glyphs
+  - file: "gfonts://Inter Tight@600"
+    id: inter_d48
+    size: 48
+    bpp: 4
+    glyphs: *ui_glyphs
+
+globals:
+  # --- cells: all packs, indexed (battery_id - 1) * 192 + cell -------------------
+  - id: cell_mv
+    type: uint16_t[576]
+    restore_value: no      # per-cell mV, RAW - no quantization
+  - id: cell_bal
+    type: uint8_t[576]
+    restore_value: no      # per-cell balancing 0/1
+  - id: cell_n
+    type: int[3]
+    restore_value: no      # cell count per pack
+  - id: cell_lim_hi
+    type: int[3]
+    restore_value: no      # pack's max cell design mV, 0 = not reported yet
+  - id: cell_lim_lo
+    type: int[3]
+    restore_value: no      # pack's min cell design mV
+  - id: p_tmax
+    type: float[3]
+    restore_value: no
+    initial_value: '{NAN, NAN, NAN}'
+  - id: p_tmin
+    type: float[3]
+    restore_value: no
+    initial_value: '{NAN, NAN, NAN}'
+  # Cell monitor state, shared between render_cells and the chart's draw event.
+  - id: c_ilo
+    type: int
+    restore_value: no
+    initial_value: '-1'    # lowest / highest cell of the selected pack, -1 = none
+  - id: c_ihi
+    type: int
+    restore_value: no
+    initial_value: '-1'
+  - id: c_fault
+    type: int
+    restore_value: no
+    initial_value: '0'     # bit 0 = min below design limit, bit 1 = max above it
+  - id: cell_focus
+    type: int
+    restore_value: no
+    initial_value: '-1'    # highlighted cell, -1 = none
+  - id: cell_focus_kind
+    type: int
+    restore_value: no
+    initial_value: '0'     # 0 tapped on the chart, 1 = MAX, 2 = MIN from MAIN
+  # --- packs ---------------------------------------------------------------------
+  - id: n_bat
+    type: int
+    restore_value: no
+    initial_value: '0'     # packs the emulator reports, 0 = not heard from yet
+  - id: sel_pack
+    type: int
+    restore_value: no
+    initial_value: '0'     # pack shown on CELL MONITOR and BATTERY INFO, 0-based
+  # --- emulator selection --------------------------------------------------------
+  # MAC of the emulator being watched. Frames from anyone else are dropped by the decoder,
+  # so switching is instant - every candidate is already a registered peer.
+  - id: sel_mac
+    type: uint8_t[6]
+    restore_value: no
+  - id: sel_name
+    type: std::string
+    restore_value: no
+  - id: emu_index
+    type: int
+    restore_value: no
+    initial_value: '0'
+  # --- emulator-wide state, -1 = not reported yet --------------------------------
+  - id: st_sys
+    type: int
+    restore_value: no
+    initial_value: '-1'    # system_status_enum
+  - id: st_emu
+    type: int
+    restore_value: no
+    initial_value: '-1'    # EMULATOR_STATUS
+  - id: st_pause
+    type: int
+    restore_value: no
+    initial_value: '-1'    # battery_pause_status
+  - id: st_inv
+    type: int
+    restore_value: no
+    initial_value: '-1'    # inverter keepalive countdown, 0 = lost
+  - id: st_cont
+    type: int
+    restore_value: no
+    initial_value: '-1'    # contactors: 0 starting up, 1 engaged, 2 opened
+  - id: st_dcbus
+    type: int
+    restore_value: no
+    initial_value: '-1'
+  - id: st_estop
+    type: int
+    restore_value: no
+    initial_value: '-1'
+  - id: st_bcan
+    type: int
+    restore_value: no
+    initial_value: '-1'    # battery keepalive countdown of the selected pack
+  - id: rx_frames
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  # --- MAIN page ----------------------------------------------------------------
+  # m_live: installation readings arrived within live_watchdog's window. Stays false
+  # while the emulator talks but has no battery data, which the page shows as such.
+  - id: m_live
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: m_flow
+    type: int
+    restore_value: no
+    initial_value: '0'     # +1 charging, -1 discharging, 0 standby
+  - id: flow_phase
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: hdr_col
+    type: uint32_t
+    restore_value: no
+    initial_value: '0x${c_green}'   # colour of the current emulator status
+  - id: hb_level
+    type: int
+    restore_value: no
+    initial_value: '2'     # heartbeat: 0 ok, 1 warning, 2 fault / offline
+  - id: hb_tick
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: hb_on
+    type: bool
+    restore_value: no
+    initial_value: 'true'
+  - id: cur_page
+    type: int
+    restore_value: no
+    initial_value: '0'
+  # --- event log store: batch slot 0 is the most recent ---------------------------
+  - id: ev_name
+    type: std::string[10]
+    restore_value: no
+  - id: ev_msg
+    type: std::string[10]
+    restore_value: no
+  - id: ev_ts
+    type: uint32_t[10]      # emulator uptime in seconds at the occurrence
+    restore_value: no
+  - id: ev_sev
+    type: uint8_t[10]
+    restore_value: no
+  - id: ev_state
+    type: uint8_t[10]
+    restore_value: no
+  - id: ev_cnt
+    type: uint8_t[10]
+    restore_value: no
+  - id: ev_data
+    type: int16_t[10]
+    restore_value: no
+  - id: ev_have
+    type: int
+    restore_value: no
+    initial_value: '0'      # slots committed and safe to render
+  - id: ev_staged
+    type: int
+    restore_value: no
+    initial_value: '0'      # slots of the in-flight batch received so far
+  - id: ev_seen
+    type: bool
+    restore_value: no
+    initial_value: 'false'  # at least one complete batch arrived
+  # Event timestamps are emulator-relative, so ages need the emulator's clock, not ours.
+  # Every frame header carries its uptime; hold it against a local millis() mark so the
+  # ages keep ticking between frames and survive the emulator being unreachable.
+  - id: emu_uptime
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: emu_uptime_at
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+
+# --- ESP-NOW receiver -------------------------------------------------------
+# max_payload_size MUST be raised above the 250 B default, otherwise ESP-NOW v2
+# frames (cell arrays for large packs) are dropped before they ever reach the
+# trigger. It sizes THIS device's receive buffers only.
+#
+# 512 rather than the 1470 maximum: the emulator clamps its own frames to
+# ESPNOW_TX_BUFFER_SIZE, which is 452 bytes at MAX_AMOUNT_CELLS = 192, so 512
+# covers the worst case with headroom. The two ESPHome packet pools scale with
+# this value (~8 KB at 250, ~18 KB at 600, ~44 KB at 1470), so 1470 would waste
+# roughly 28 KB of heap for frames that can never arrive. Raise it only if
+# MAX_AMOUNT_CELLS is increased upstream.
+espnow:
+  max_payload_size: 512
+  # Every candidate is a peer: a frame only reaches on_receive / on_broadcast at all if
+  # its sender is in the peer table, so all of them are registered and the decoder picks
+  # which one to listen to. Switching then costs nothing and loses no frames.
+  peers:
+    - ${emulator_1_mac}
+    - ${emulator_2_mac}
+    - ${emulator_3_mac}
+  # Broadcast path: used when the emulator's "ESPNow receiver MACs" field is empty.
+  # No compile-time address filter here - the emulator is chosen at runtime, so the
+  # filter is the sel_mac comparison at the top of the decoder.
+  on_broadcast:
+    - then: &decode_be_frame
+        - lambda: |-
+            // ---------- source ----------
+            // Only the selected emulator is decoded. Everything below - the online
+            // watchdog included - is therefore about that emulator alone. (The online
+            // flag is raised in here rather than by a follow-up action: a `return`
+            // ends this lambda, not the automation, so an action placed after it
+            // would also fire for frames that were just rejected.)
+            if (memcmp(info.src_addr, id(sel_mac), 6) != 0) return;
+
+            // ---------- header ----------
+            if (size < 12) return;
+            if (data[0] != 0x42 || data[1] != 0x45) return;   // magic 'B','E'
+            if (data[2] != 2) return;                         // protocol_version
+            const uint8_t ftype = data[3];
+            const uint8_t bid   = data[6];
+            const uint8_t flags = data[7];
+            const uint32_t uptime = (uint32_t)data[8] | ((uint32_t)data[9] << 8)
+                                  | ((uint32_t)data[10] << 16) | ((uint32_t)data[11] << 24);
+
+            // frame types: 1 SYSTEM, 2 BATTERY, 3 CELLS, 4 EVENT, 5 AGGREGATE
+            if (ftype < 1 || ftype > 5) return;               // a future frame type
+            const int ps = (bid >= 1 && bid <= 3) ? (bid - 1) : -1;   // pack slot
+            if ((ftype == 2 || ftype == 3) && ps < 0) return;         // unknown pack id
+
+            // Three audiences for what a frame carries:
+            //   inst - installation views (MAIN, ENERGY): pack 1 while it is the only
+            //          pack, the AGGREGATE frame once there are several.
+            //   selp - per-pack detail view (BATTERY INFO): the pack picked there.
+            //   ps   - per-pack stores (cell arrays, BATTERIES cards): every pack.
+            const bool multi = id(n_bat) > 1;
+            const bool inst  = ftype == 5 || (ftype == 2 && ps == 0 && !multi);
+            const bool selp  = ftype == 2 && ps == id(sel_pack);
+
+            // Anchor the emulator clock on every frame type, not just SYSTEM.
+            id(emu_uptime) = uptime;
+            id(emu_uptime_at) = millis();
+            id(rx_frames)++;
+            id(be1_online).publish_state(true);
+            id(be1_watchdog).execute();
+
+            auto uval = [](const uint8_t* v, uint16_t n) -> uint64_t {
+              uint64_t r = 0;
+              for (uint16_t k = 0; k < n && k < 8; k++) r |= (uint64_t)v[k] << (8 * k);
+              return r;
+            };
+            auto ival = [&](const uint8_t* v, uint16_t n) -> int64_t {
+              uint64_t u = uval(v, n);
+              if (n > 0 && n < 8 && ((u >> (n * 8 - 1)) & 1))
+                u |= ~((1ULL << (n * 8)) - 1);
+              return (int64_t)u;
+            };
+            auto fval = [](const uint8_t* v) -> float {
+              uint32_t b = (uint32_t)v[0] | ((uint32_t)v[1] << 8)
+                         | ((uint32_t)v[2] << 16) | ((uint32_t)v[3] << 24);
+              float f; memcpy(&f, &b, 4); return f;
+            };
+            // A label is only touched when its text or colour really changes: most
+            // readings repeat every second, and an untouched label costs no redraw -
+            // and no VNC traffic either.
+            auto put = [](lv_obj_t* l, const char* s) {
+              if (strcmp(lv_label_get_text(l), s) != 0) lv_label_set_text(l, s);
+            };
+            auto putf = [&](lv_obj_t* l, const char* fmt, auto... a) {
+              char t[128]; snprintf(t, sizeof(t), fmt, a...); put(l, t);
+            };
+            auto col = [](lv_obj_t* l, uint32_t c) {
+              const lv_color_t n = lv_color_hex(c);
+              if (!lv_color_eq(lv_obj_get_style_text_color(l, LV_PART_MAIN), n))
+                lv_obj_set_style_text_color(l, n, LV_PART_MAIN);
+            };
+            // printf a reading, or "--" when this frame did not carry it
+            auto fs = [](const char* fmt, float x) -> std::string {
+              if (std::isnan(x)) return "--";
+              char b[24]; snprintf(b, sizeof(b), fmt, x); return b;
+            };
+
+            // Readings of this frame. NAN / -1 = not in it: a battery integration omits
+            // what it does not provide, so an absent key must never blank a reading.
+            float soc = NAN, rsoc = NAN, soh = NAN, volt = NAN, cur = NAN, pw = NAN;
+            float tmax = NAN, tmin = NAN, rcur = NAN, capw = NAN, rcapw = NAN;
+            float remw = NAN, rremw = NAN, tchg = NAN, tdis = NAN;
+            float mcw = NAN, mdw = NAN, mca = NAN, mda = NAN, ocw = NAN, odw = NAN;
+            int cmax = -1, cmin = -1, chg = -1, lim = -1, bms = -1, det = -1, bal = -1, baln = -1;
+            uint16_t cell_first = 0;     // set by KEY_CELL_INDEX before the arrays
+
+            // One EVENT frame is one event, spread over several records, and carries its
+            // position in the emulator's replay batch. Collected here, filed after the walk.
+            char     e_name[48] = {0};
+            char     e_msg[160] = {0};
+            uint64_t e_ms = 0;
+            uint8_t  e_sev = 0, e_state = 2, e_cnt = 0;
+            int16_t  e_data = 0;
+            bool     e_data16 = false;
+            int      e_idx = -1, e_total = 0;
+
+            if (ftype == 1) {
+              const unsigned d = uptime / 86400, h = (uptime / 3600) % 24;
+              const unsigned m = (uptime / 60) % 60, s = uptime % 60;
+              if (d) putf(id(v_uptime), "%ud %02u:%02u:%02u", d, h, m, s);
+              else   putf(id(v_uptime), "%02u:%02u:%02u", h, m, s);
+            }
+
+            // ---------- TLV walk ----------
+            size_t i = 12;
+            while (i + 2 <= size) {
+              uint8_t key = data[i++];
+              const uint8_t tag = data[i++];
+              const uint8_t lc  = tag & 0x1F;
+              uint16_t n;
+              if (lc < 30)        { n = lc; }
+              else if (lc == 30)  { if (i >= size) break; n = data[i++]; }
+              else                { if (i + 1 >= size) break;
+                                    n = (uint16_t)(data[i] | (data[i+1] << 8)); i += 2; }
+              if (i + n > size) break;              // truncated - stop cleanly
+              const uint8_t* v = data + i;
+              i += n;
+              if (n == 0) continue;
+
+              // AGGREGATE keys (0xB0..0xC5) are renamed onto their per-pack twins, so one
+              // switch decodes both. ps is -1 for that frame, so nothing lands in a pack.
+              if (ftype == 5) {
+                static const uint8_t twin[22] = {
+                  0x50, 0x51, 0x52, 0x53, 0x54, 0x56, 0x32, 0x33, 0x57, 0x58, 0x59,
+                  0x5A, 0x5B, 0x5C, 0x5F, 0x60, 0x61, 0x62, 0x63, 0x64, 0x68, 0x69};
+                if (key < 0xB0 || key > 0xC5) continue;
+                key = twin[key - 0xB0];
+              }
+
+              switch (key) {
+                // ===== SYSTEM (frame type 1) =====
+                case 0x01: put(id(v_fw),   std::string((const char*)v, n).c_str()); break;
+                case 0x02: put(id(v_host), std::string((const char*)v, n).c_str()); break;
+                case 0x03: if (n >= 6)   // BE station MAC = ESPNow source address
+                             putf(id(v_mac), "%02X:%02X:%02X:%02X:%02X:%02X",
+                                  v[0], v[1], v[2], v[3], v[4], v[5]);
+                           break;
+                case 0x04: { const int s = (int)uval(v, n);   // system_status_enum (2 unused)
+                  id(st_sys) = s;
+                  put(id(v_sysst), s==0?"Standby":s==1?"Inactive":s==3?"Active":
+                                   s==4?"Fault":s==5?"Updating":"Unknown"); break; }
+                case 0x05: { const int s = (int)uval(v, n);   // battery_pause_status
+                  id(st_pause) = s;
+                  put(id(v_pause), s==0?"Normal":s==1?"Pausing":s==2?"Paused":
+                                   s==3?"Resuming":"Unknown"); break; }
+                case 0x06: { const int s = (int)uval(v, n);   // EVENTS_LEVEL_TYPE
+                  // Upstream order is INFO, DEBUG, WARNING, UPDATE, ERROR.
+                  put(id(v_evlvl), s==0?"Info":s==1?"Debug":s==2?"Warning":
+                                   s==3?"Update":s==4?"Error":"Unknown"); break; }
+                case 0x07: { const int s = (int)uval(v, n);   // EMULATOR_STATUS
+                  id(st_emu) = s;
+                  put(id(v_emust), s==0?"OK":s==1?"Warning":s==2?"Error":
+                                   s==3?"Updating":"Unknown"); break; }
+                case 0x08: if (n >= 4) putf(id(v_cpu), "%.1f °C", fval(v)); break;
+                case 0x09: putf(id(v_heap), "%.1f kB", uval(v, n) / 1024.0); break;
+                case 0x0A: {                                   // KEY_BATTERY_COUNT
+                  const int c = (int)uval(v, n);
+                  if (c != id(n_bat)) {
+                    id(n_bat) = c;
+                    id(apply_battery_count).execute(c);
+                  }
+                  break; }
+                case 0x0B: putf(id(v_rssi), "%d dBm", (int)ival(v, n)); break;
+                case 0x0C: id(st_inv)   = (int)uval(v, n); break;   // keepalive countdown
+                case 0x0D: id(st_cont)  = (int)uval(v, n); break;
+                case 0x0E: id(st_dcbus) = v[0] ? 1 : 0; break;
+                case 0x0F: id(st_estop) = v[0] ? 1 : 0; break;
+                case 0x10: if (n >= 4)   // IPv4, 4 octets
+                             putf(id(v_ip), "%u.%u.%u.%u", (unsigned)v[0], (unsigned)v[1],
+                                  (unsigned)v[2], (unsigned)v[3]);
+                           break;
+                case 0x11: put(id(v_ssid), std::string((const char*)v, n).c_str()); break;
+                case 0x12: put(id(v_ap), v[0] ? "Active" : "Off");
+                           col(id(v_ap), v[0] ? 0x${c_amber} : 0xFFFFFF); break;
+
+                // ===== BATTERY nameplate (frame type 2) =====
+                case 0x31: if (selp) { const int c = (int)uval(v, n);   // battery_chemistry_enum
+                    const char* ch = c==1?"NCA":c==2?"NMC":c==3?"LFP":c==4?"ZEBRA":"";
+                    if (multi) putf(id(v_info_badge), "PACK %d / %d", ps + 1, id(n_bat));
+                    else       put(id(v_info_badge), ch);
+                  }
+                  break;
+                case 0x32: capw  = (float)uval(v, n); break;
+                case 0x33: rcapw = (float)uval(v, n); break;
+                case 0x36: if (ps >= 0) id(cell_lim_hi)[ps] = (int)uval(v, n); break;
+                case 0x37: if (ps >= 0) id(cell_lim_lo)[ps] = (int)uval(v, n); break;
+
+                // ===== BATTERY live values (frame type 2, and 5 via twin[]) =====
+                case 0x50: soc   = uval(v, n) / 100.0f; break;    // reported / scaled SOC
+                case 0x51: rsoc  = uval(v, n) / 100.0f; break;    // real SOC from the BMS
+                case 0x52: soh   = uval(v, n) / 100.0f; break;
+                case 0x53: volt  = uval(v, n) / 10.0f;  break;
+                case 0x54: cur   = ival(v, n) / 10.0f;  break;    // + = charging
+                case 0x55: rcur  = ival(v, n) / 10.0f;  break;    // all packs, to inverter
+                case 0x56: pw    = (float)ival(v, n);   break;    // + = charging
+                case 0x57: remw  = (float)uval(v, n);   break;
+                case 0x58: rremw = (float)uval(v, n);   break;
+                case 0x59: mcw   = (float)uval(v, n);   break;
+                case 0x5A: mdw   = (float)uval(v, n);   break;
+                case 0x5B: mca   = uval(v, n) / 10.0f;  break;
+                case 0x5C: mda   = uval(v, n) / 10.0f;  break;
+                case 0x5D: ocw   = (float)uval(v, n);   break;
+                case 0x5E: odw   = (float)uval(v, n);   break;
+                case 0x5F: cmax  = (int)uval(v, n);     break;
+                case 0x60: cmin  = (int)uval(v, n);     break;
+                case 0x61: tmax  = ival(v, n) / 10.0f;  break;
+                case 0x62: tmin  = ival(v, n) / 10.0f;  break;
+                case 0x63: tchg  = (float)ival(v, n);   break;
+                case 0x64: tdis  = (float)ival(v, n);   break;
+                case 0x65: if (selp) putf(id(v_iso), "ISOLATION  %u kOhm", (unsigned)uval(v, n)); break;
+                case 0x66: bal   = (int)uval(v, n);     break;    // balancing_status_enum
+                case 0x67: baln  = (int)uval(v, n);     break;
+                case 0x68: chg   = (int)uval(v, n);     break;    // ChargingState
+                case 0x69: lim   = (int)uval(v, n);     break;    // LimitingFactor
+                case 0x6A: bms   = (int)uval(v, n);     break;    // real_bms_status_enum
+                case 0x6B: if (selp) id(st_bcan) = (int)uval(v, n); break;
+                case 0x6C: if (selp) putf(id(v_canerr), "CAN ERRORS  %u", (unsigned)uval(v, n)); break;
+                case 0x6D: if (ps == 0) { const int m = (int)uval(v, n);   // led_mode_enum
+                    put(id(v_led), m==0?"Classic":m==1?"Flow":m==2?"Heartbeat":m==3?"GRB Classic":
+                                   m==4?"GRB Flow":m==5?"GRB Heartbeat":"Unknown"); }
+                  break;
+                case 0x6E: det = v[0] ? 1 : 0; break;   // always sent: 0 % vs. "not there"
+
+                // ===== CELLS (frame type 3) =====
+                case 0x90: if (ps >= 0) { int c = (int)uval(v, n);
+                    id(cell_n)[ps] = c > 192 ? 192 : c; }
+                  break;
+                case 0x91: cell_first = (uint16_t)uval(v, n); break;
+                case 0x92: if (ps >= 0) {                      // raw mV, uint16 LE
+                    const uint16_t cnt = n / 2;
+                    for (uint16_t k = 0; k < cnt; k++) {
+                      const uint16_t idx = cell_first + k;
+                      if (idx < 192) id(cell_mv)[ps * 192 + idx] = (uint16_t)(v[2*k] | (v[2*k+1] << 8));
+                    }
+                  }
+                  break;
+                case 0x93: if (ps >= 0) {                      // balancing bitset, LSB first
+                    for (uint16_t k = 0; k < (uint16_t)n * 8; k++) {
+                      const uint16_t idx = cell_first + k;
+                      if (idx < 192) id(cell_bal)[ps * 192 + idx] = (v[k / 8] >> (k % 8)) & 1;
+                    }
+                  }
+                  break;
+
+                // ===== EVENT (frame type 4) =====
+                // Collected only - filing happens once, after the walk.
+                case 0xA1: { size_t l = n < sizeof(e_name) - 1 ? n : sizeof(e_name) - 1;
+                  memcpy(e_name, v, l); e_name[l] = 0; break; }
+                case 0xA7: { size_t l = n < sizeof(e_msg) - 1 ? n : sizeof(e_msg) - 1;
+                  memcpy(e_msg, v, l); e_msg[l] = 0; break; }
+                case 0xA2: e_sev   = v[0]; break;
+                case 0xA3: e_state = v[0]; break;
+                case 0xA4: e_cnt   = v[0]; break;
+                // 0xA5 is the retired 8 bit payload of older emulators; 0xAA replaced it.
+                case 0xA5: if (!e_data16) e_data = v[0]; break;
+                case 0xAA: e_data  = (int16_t)ival(v, n); e_data16 = true; break;
+                case 0xA6: e_ms    = uval(v, n); break;
+                case 0xA8: e_idx   = (int)uval(v, n); break;   // 0 = most recent
+                case 0xA9: e_total = (int)uval(v, n); break;
+
+                // Unknown keys are already skipped by their length, including key
+                // 0xFF (future 16 bit key space): its extended key lives inside
+                // the value, so no special case is needed here - ever.
+                default: break;
+              }
+            }
+
+            // ---------- MAIN: installation readings ----------
+            // The live block (SOC, voltage, current, ...) is only sent while the pack is
+            // detected and talking, so its presence is what "live" means.
+            if (inst && !std::isnan(soc)) {
+              // Direction: the emulator's own ChargingState, else the sign of the current.
+              int flow = chg == 1 ? 1 : chg == 2 ? -1 : 0;
+              if (chg < 0 && !std::isnan(cur)) flow = cur > 0.05f ? 1 : cur < -0.05f ? -1 : 0;
+              const uint32_t fcol = flow > 0 ? 0x${c_green} : flow < 0 ? 0x${c_blue} : 0x${c_muted};
+              const uint32_t scol = flow < 0 ? 0x${c_blue} : 0x${c_green};
+              int p = (int)lroundf(soc);
+              p = p < 0 ? 0 : (p > 100 ? 100 : p);
+              if (lv_arc_get_value(id(soc_arc)) != p) lv_arc_set_value(id(soc_arc), p);
+              const lv_color_t sc = lv_color_hex(scol);
+              if (!lv_color_eq(lv_obj_get_style_arc_color(id(soc_arc), LV_PART_INDICATOR), sc))
+                lv_obj_set_style_arc_color(id(soc_arc), sc, LV_PART_INDICATOR);
+              putf(id(v_soc), "%.1f%%", soc);
+              col(id(v_soc), scol);
+              if (!std::isnan(volt)) putf(id(v_volt), "%.1f V", volt);
+              col(id(v_volt), 0x${c_blue});
+
+              // POWER is shown unsigned - the direction is in CURRENT, the arrow and the
+              // colour. Both cards always share one font size: when either value is too
+              // wide for the 48 px face they step down to 32 px together.
+              char pt[16] = "-- W", ct[16] = "-- A";
+              if (!std::isnan(pw)) {
+                const float a = fabsf(pw);
+                if (a < 0.5f)          snprintf(pt, sizeof(pt), "0 W");
+                else if (a < 1000.0f)  snprintf(pt, sizeof(pt), "%.0f W", a);
+                else                   snprintf(pt, sizeof(pt), "%.1f kW", a / 1000.0f);
+              }
+              if (!std::isnan(cur)) snprintf(ct, sizeof(ct), "%+.1f A", cur);
+              const lv_font_t* f48 = id(inter_d48)->get_lv_font();
+              lv_point_t s1, s2;
+              lv_text_get_size(&s1, pt, f48, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+              lv_text_get_size(&s2, ct, f48, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+              const bool compact = s1.x > 174 || s2.x > 174;
+              const lv_font_t* mf = compact ? id(inter_d32)->get_lv_font() : f48;
+              if (lv_obj_get_style_text_font(id(v_pow), LV_PART_MAIN) != mf) {
+                lv_obj_set_style_text_font(id(v_pow), mf, LV_PART_MAIN);
+                lv_obj_set_style_text_font(id(v_cur), mf, LV_PART_MAIN);
+                lv_obj_set_y(id(v_pow), compact ? 54 : 44);
+                lv_obj_set_y(id(v_cur), compact ? 56 : 46);
+              }
+              put(id(v_pow), pt);  col(id(v_pow), fcol);
+              put(id(v_cur), ct);  col(id(v_cur), fcol);
+
+              // Bottom card. One pack: cell max / min and delta. Several packs: the
+              // installation's scaled energy and power limits instead - the cells are on
+              // the BATTERIES and CELL MONITOR pages. render_link picks the visible set.
+              if (multi) {
+                if (!std::isnan(rremw)) putf(id(v_mrem), "rem. %.1f kWh", rremw / 1000.0f);
+                if (!std::isnan(rcapw)) putf(id(v_mtot), "tot. %.1f kWh", rcapw / 1000.0f);
+                if (!std::isnan(mdw))   putf(id(v_mdis), "max dis %.1f kW", mdw / 1000.0f);
+                if (!std::isnan(mcw))   putf(id(v_mchg), "max chg %.1f kW", mcw / 1000.0f);
+              } else {
+                // Out-of-range cells go red against pack 1's design limits, or the
+                // reference's 3.000 / 4.250 V while those are not known.
+                const int hi_lim = id(cell_lim_hi)[0] > 0 ? id(cell_lim_hi)[0] : 4250;
+                const int lo_lim = id(cell_lim_lo)[0] > 0 ? id(cell_lim_lo)[0] : 3000;
+                if (cmax > 0) { putf(id(v_cmax), "MAX %.3f V", cmax / 1000.0f);
+                                col(id(v_cmax), cmax > hi_lim ? 0x${c_red} : 0x${c_green}); }
+                if (cmin > 0) { putf(id(v_cmin), "MIN  %.3f V", cmin / 1000.0f);
+                                col(id(v_cmin), cmin < lo_lim ? 0x${c_red} : 0x${c_blue}); }
+                if (cmax > 0 && cmin > 0) {
+                  const int d = cmax - cmin;
+                  putf(id(v_delta), "Δ %d mV", d);
+                  col(id(v_delta), d < 100 ? 0x${c_green} : d <= 300 ? 0x${c_amber} : 0x${c_red});
+                }
+              }
+              if (!std::isnan(tmax)) putf(id(v_temp), "%.1f°C", tmax);
+
+              const bool was_live = id(m_live);
+              id(m_live) = true;
+              id(live_watchdog).execute();
+              if (!was_live) id(render_link).execute();
+              if (flow != id(m_flow) || !was_live) {
+                id(m_flow) = flow;
+                id(render_flow).execute();
+              }
+            }
+
+            // ---------- ENERGY: installation totals ----------
+            if (inst) {
+              auto energy = [&](lv_obj_t* l, float wh) {
+                if (fabsf(wh) >= 1.0e6f) putf(l, "%.2f MWh", wh / 1.0e6f);
+                else                     putf(l, "%.1f kWh", wh / 1000.0f);
+              };
+              if (!std::isnan(remw)) energy(id(v_rem), remw);
+              if (!std::isnan(capw)) energy(id(v_cap), capw);
+              if (!std::isnan(tchg)) energy(id(v_tchg), tchg);
+              if (!std::isnan(tdis)) energy(id(v_tdis), tdis);
+              if (!std::isnan(soh))  putf(id(v_soh_e), "SOH %.0f%%", soh);
+              if (!std::isnan(rcapw))
+                putf(id(v_rep), "REPORTED  %s / %.1f kWh",
+                     fs("%.1f", std::isnan(rremw) ? NAN : rremw / 1000.0f).c_str(), rcapw / 1000.0f);
+              if (lim >= 0) {
+                put(id(v_limit), lim==0?"LIMITED BY  NOTHING":lim==1?"LIMITED BY  INVERTER":
+                                 lim==2?"LIMITED BY  USER SETTING":lim==3?"LIMITED BY  BATTERY":
+                                 "LIMITED BY  --");
+                col(id(v_limit), lim == 0 ? 0x${c_green} : lim == 3 ? 0x${c_amber} : 0xFFFFFF);
+              }
+            }
+            // The user overrides and the current reported to the inverter only ride in
+            // pack frames - pack 1's stands for the installation.
+            if (ftype == 2 && ps == 0) {
+              if (!std::isnan(ocw) || !std::isnan(odw))
+                putf(id(v_ovr), "USER OVERRIDE  CHG %s kW  |  DIS %s kW",
+                     fs("%.1f", ocw / 1000.0f).c_str(), fs("%.1f", odw / 1000.0f).c_str());
+              if (!std::isnan(rcur)) putf(id(v_rcur), "CURRENT TO INVERTER  %+.1f A", rcur);
+            }
+
+            // ---------- per-pack stores ----------
+            if (ftype == 2) {
+              if (!std::isnan(tmax)) id(p_tmax)[ps] = tmax;
+              if (!std::isnan(tmin)) id(p_tmin)[ps] = tmin;
+              if (ps == id(sel_pack) && (!std::isnan(tmax) || !std::isnan(tmin)))
+                putf(id(c_tmp_v), "%s\n%s", fs("%.1f °C", id(p_tmin)[ps]).c_str(),
+                     fs("%.1f °C", id(p_tmax)[ps]).c_str());
+              // BATTERIES card of this pack (the reference's multi-pack dashboard)
+              if (multi) {
+                lv_obj_t* bt[3] = {id(bt_1), id(bt_2), id(bt_3)};
+                if (std::isnan(soc)) {
+                  put(bt[ps], "NO LIVE DATA FROM THIS PACK");
+                  col(bt[ps], 0x${c_red});
+                } else {
+                  // SoC, capacity and remaining are the scaled (reported) values, the
+                  // same kind MAIN shows for the installation. Power and current are
+                  // signed, + = charging; limits read discharge / charge.
+                  const std::string t =
+                      "SoH " + fs("%.1f%%", soh) + ", SoC " + fs("%.1f%%", soc) +
+                      ", Cap. " + fs("%.1f", rcapw / 1000.0f) + " kWh rem. " +
+                      fs("%.1f", rremw / 1000.0f) + " kWh\n" +
+                      fs("%+.1f", pw / 1000.0f) + "kW, " + fs("%+.1f", cur) +
+                      "A, max dis/ch: " + fs("%.1f", mdw / 1000.0f) + "/" +
+                      fs("%.1f", mcw / 1000.0f) + "kW; " + fs("%.1f", mda) + "/" +
+                      fs("%.1f", mca) + "A\nCells " +
+                      fs("%.0f", cmin > 0 ? (float)cmin : NAN) + "/" +
+                      fs("%.0f", cmax > 0 ? (float)cmax : NAN) + " mV, Δ " +
+                      fs("%.0f", (cmin > 0 && cmax > 0) ? (float)(cmax - cmin) : NAN) +
+                      " mV, Temp " + fs("%.1f", tmin) + "/" + fs("%.1f", tmax) + " °C";
+                  put(bt[ps], t.c_str());
+                  col(bt[ps], chg == 1 ? 0x${c_green} : chg == 2 ? 0x${c_blue} : 0xFFFFFF);
+                }
+              }
+            }
+
+            // ---------- BATTERY INFO: the selected pack ----------
+            if (selp) {
+              if (det == 0) {
+                put(id(v_bms_row), "BATTERY  #${c_red} NOT DETECTED#");
+              } else if (bms >= 0) {
+                static const char* const BMS[4] = {"DISCONNECTED", "STANDBY", "ACTIVE", "FAULT"};
+                static const char* const BCOL[4] = {"${c_red}", "${c_amber}", "${c_green}", "${c_red}"};
+                putf(id(v_bms_row), "BMS STATUS  #%s %s#", bms < 4 ? BCOL[bms] : "${c_muted}",
+                     bms < 4 ? BMS[bms] : "UNKNOWN");
+              }
+              if (!std::isnan(soh) || !std::isnan(rsoc))
+                putf(id(v_health), "SOH %s        REAL SOC %s",
+                     fs("%.0f%%", soh).c_str(), fs("%.1f%%", rsoc).c_str());
+              if (!std::isnan(mcw))
+                putf(id(v_chg_lim), "CHARGE LIMIT       %.1f kW  |  %s A", mcw / 1000.0f,
+                     fs("%.1f", mca).c_str());
+              if (!std::isnan(mdw))
+                putf(id(v_dis_lim), "DISCHARGE LIMIT    %.1f kW  |  %s A", mdw / 1000.0f,
+                     fs("%.1f", mda).c_str());
+              if (bal >= 0) {
+                static const char* const BAL[5] = {"UNKNOWN", "ERROR", "READY", "ACTIVE", "BLOCKED"};
+                const char* bn = bal < 5 ? BAL[bal] : "UNKNOWN";
+                if (baln > 0) putf(id(v_bal), "BALANCING  %s  %d", bn, baln);
+                else          putf(id(v_bal), "BALANCING  %s", bn);
+                col(id(v_bal), bal == 3 ? 0x${c_soft_amber} : bal == 1 ? 0x${c_red} : 0x${c_blue});
+              }
+            }
+
+            // ---------- event log ----------
+            // Frames are filed by their batch index, so a lost frame leaves one stale slot
+            // instead of shifting the whole list. The batch is complete when the frame
+            // without MORE_CHUNKS lands; only then does it become visible. The emulator
+            // re-sends the batch periodically, so it REPLACES the list - repetition is
+            // intended, not a duplicate.
+            if (ftype == 4 && e_idx >= 0 && e_idx < 10 && e_total > 0) {
+              const char* nm = e_name;
+              if (strncmp(nm, "EVENT_", 6) == 0) nm += 6;   // the prefix is on every name
+              id(ev_name)[e_idx]  = nm;
+              id(ev_msg)[e_idx]   = e_msg;
+              id(ev_ts)[e_idx]    = (uint32_t)(e_ms / 1000);
+              id(ev_sev)[e_idx]   = e_sev;
+              id(ev_state)[e_idx] = e_state;
+              id(ev_cnt)[e_idx]   = e_cnt;
+              id(ev_data)[e_idx]  = e_data;
+              if (e_idx + 1 > id(ev_staged)) id(ev_staged) = e_idx + 1;
+              if (!(flags & 0x01)) {                        // last frame of the batch
+                id(ev_have) = id(ev_staged) < e_total ? id(ev_staged) : e_total;
+                id(ev_staged) = 0;
+                id(ev_seen) = true;
+                id(render_events).execute();
+                id(render_warning).execute();
+                if (!id(m_live)) id(render_link).execute();   // offline text lists events
+              }
+            }
+
+            // Last cell chunk of the pack on view: refresh its monitor. Other packs are
+            // only stored - they are drawn when picked.
+            if (ftype == 3 && !(flags & 0x01) && ps == id(sel_pack)) id(render_cells).execute();
+
+            if (ftype == 1) id(render_status).execute();
+
+  # Unicast path: used when the emulator's "ESPNow receiver MACs" field lists
+  # this display. Same decoder via the YAML anchor above.
+  on_receive:
+    - then: *decode_be_frame
+
+script:
+  # Adopts the emulator called `name`, which is the mapping key. Each matrix button passes
+  # its own label, so nothing here has to interrogate the widget. Tapping the emulator
+  # already watched (e.g. to leave the Display card) only switches the card back.
+  - id: select_emulator
+    mode: restart
+    parameters:
+      name: string
+    then:
+      - script.execute:
+          id: show_sys_view
+          view: 0
+      - lambda: |-
+          // Mapping returns a std::string; parse it into the 6 bytes the filter compares.
+          // A malformed entry would otherwise leave a half-written MAC, so write only on
+          // a complete parse.
+          const std::string mac = id(emulator_macs)[name];
+          unsigned b[6];
+          if (sscanf(mac.c_str(), "%x:%x:%x:%x:%x:%x",
+                     &b[0], &b[1], &b[2], &b[3], &b[4], &b[5]) != 6) {
+            ESP_LOGW("emu", "no usable MAC for '%s'", name.c_str());
+            return;
+          }
+          bool same = true;
+          for (int k = 0; k < 6; k++) same = same && id(sel_mac)[k] == (uint8_t)b[k];
+          if (same) return;
+          id(sel_name) = name;
+          id(emu_index) = name == "${emulator_2_name}" ? 1 : name == "${emulator_3_name}" ? 2 : 0;
+          for (int k = 0; k < 6; k++) id(sel_mac)[k] = (uint8_t)b[k];
+          // Everything on screen belongs to the emulator we just left.
+          id(reset_view).execute();
+
+  # SYSTEM page: 0 = the watched emulator's card, 1 = this display's card.
+  - id: show_sys_view
+    mode: restart
+    parameters:
+      view: int
+    then:
+      - lambda: |-
+          if (view == 1) {
+            lv_obj_add_flag(id(sys_emu), LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_flag(id(sys_disp), LV_OBJ_FLAG_HIDDEN);
+          } else {
+            lv_obj_add_flag(id(sys_disp), LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_flag(id(sys_emu), LV_OBJ_FLAG_HIDDEN);
+          }
+
+  # DISPLAY MENU "NEXT EMULATOR": steps through the selector and checks its button,
+  # exactly as if that button had been tapped on the SYSTEM page.
+  - id: next_emulator
+    mode: restart
+    then:
+      - lambda: 'id(emu_index) = (id(emu_index) + 1) % 3;'
+      - if:
+          condition:
+            lambda: 'return id(emu_index) == 0;'
+          then:
+            - lvgl.matrix.button.update: { id: emu_b1, control: { checked: true } }
+            - script.execute: { id: select_emulator, name: "${emulator_1_name}" }
+      - if:
+          condition:
+            lambda: 'return id(emu_index) == 1;'
+          then:
+            - lvgl.matrix.button.update: { id: emu_b2, control: { checked: true } }
+            - script.execute: { id: select_emulator, name: "${emulator_2_name}" }
+      - if:
+          condition:
+            lambda: 'return id(emu_index) == 2;'
+          then:
+            - lvgl.matrix.button.update: { id: emu_b3, control: { checked: true } }
+            - script.execute: { id: select_emulator, name: "${emulator_3_name}" }
+      - script.execute:
+          id: toast
+          text: !lambda 'return "NOW WATCHING  " + id(sel_name);'
+
+  # Blanks every reading so nothing from the previous emulator is left looking current.
+  # The frames that repopulate this arrive within a second.
+  - id: reset_view
+    mode: restart
+    then:
+      - lambda: |-
+          id(m_live) = false;
+          id(m_flow) = 0;
+          id(ev_have) = 0;
+          id(ev_staged) = 0;
+          id(ev_seen) = false;
+          id(n_bat) = 0;
+          id(sel_pack) = 0;
+          id(cell_focus) = -1;
+          id(emu_uptime) = 0;
+          id(rx_frames) = 0;
+          id(st_sys) = id(st_emu) = id(st_pause) = id(st_inv) = -1;
+          id(st_cont) = id(st_dcbus) = id(st_estop) = id(st_bcan) = -1;
+          for (int k = 0; k < 3; k++) {
+            id(cell_n)[k] = 0; id(cell_lim_hi)[k] = 0; id(cell_lim_lo)[k] = 0;
+            id(p_tmax)[k] = NAN; id(p_tmin)[k] = NAN;
+          }
+          for (int k = 0; k < 10; k++) { id(ev_name)[k].clear(); id(ev_msg)[k].clear(); }
+          id(be1_online).publish_state(false);
+          struct { lv_obj_t* l; const char* t; } blank[] = {
+            {id(v_cmax), "MAX -- V"}, {id(v_cmin), "MIN  -- V"}, {id(v_delta), "Δ -- mV"},
+            {id(v_temp), "--.-°C"},
+            {id(v_mrem), "rem. -- kWh"}, {id(v_mtot), "tot. -- kWh"},
+            {id(v_mdis), "max dis -- kW"}, {id(v_mchg), "max chg -- kW"},
+            {id(bt_1), "WAITING FOR DATA"}, {id(bt_2), "WAITING FOR DATA"},
+            {id(bt_3), "WAITING FOR DATA"},
+            {id(c_tmp_v), "--\n--"},
+            {id(v_info_badge), ""}, {id(v_bms_row), "BMS STATUS  --"},
+            {id(v_health), "SOH --        REAL SOC --"},
+            {id(v_chg_lim), "CHARGE LIMIT       -- kW  |  -- A"},
+            {id(v_dis_lim), "DISCHARGE LIMIT    -- kW  |  -- A"},
+            {id(v_bal), "BALANCING  --"}, {id(v_canerr), "CAN ERRORS  --"},
+            {id(v_iso), "ISOLATION  --"},
+            {id(v_rem), "-- kWh"}, {id(v_cap), "-- kWh"}, {id(v_tchg), "-- kWh"},
+            {id(v_tdis), "-- kWh"}, {id(v_soh_e), "SOH --"}, {id(v_rep), "REPORTED  --"},
+            {id(v_limit), "LIMITED BY  --"}, {id(v_ovr), "USER OVERRIDE  --"},
+            {id(v_rcur), "CURRENT TO INVERTER  --"},
+            {id(v_fw), "--"}, {id(v_host), "--"}, {id(v_uptime), "--"}, {id(v_sysst), "--"},
+            {id(v_emust), "--"}, {id(v_pause), "--"}, {id(v_evlvl), "--"}, {id(v_cpu), "--"},
+            {id(v_heap), "--"}, {id(v_led), "--"}, {id(v_ip), "--"}, {id(v_mac), "--"},
+            {id(v_ssid), "--"}, {id(v_rssi), "--"}, {id(v_ap), "--"},
+          };
+          for (auto& b : blank) lv_label_set_text(b.l, b.t);
+          lv_obj_t* grey[] = {id(v_cmax), id(v_cmin), id(v_delta), id(v_ap), id(v_bal),
+                              id(v_limit), id(bt_1), id(bt_2), id(bt_3)};
+          for (auto* l : grey) lv_obj_set_style_text_color(l, lv_color_hex(0x${c_muted}), 0);
+      - script.execute:
+          id: apply_battery_count
+          count: 1
+      - script.execute: render_link
+      - script.execute: render_events
+      - script.execute: render_cells
+
+  # Matches the pack-dependent parts of the UI to the number of packs the emulator
+  # reports: the BATTERIES page (and its dot) exist only with more than one, and its
+  # cards take the reference's 2-up or 3-up geometry.
+  - id: apply_battery_count
+    mode: restart
+    parameters:
+      count: int
+    then:
+      - lambda: |-
+          const bool multi = count > 1;
+          id(pg_batt)->skip = !multi;
+          if (!multi || id(sel_pack) >= count) id(sel_pack) = 0;
+          lv_obj_t* cards[3] = {id(bc_1), id(bc_2), id(bc_3)};
+          for (int k = 0; k < 3; k++) {
+            if (k >= count) { lv_obj_add_flag(cards[k], LV_OBJ_FLAG_HIDDEN); continue; }
+            lv_obj_remove_flag(cards[k], LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_y(cards[k], count == 2 ? 72 + k * 184 : 68 + k * 124);
+            lv_obj_set_height(cards[k], count == 2 ? 172 : 116);
+          }
+          lv_label_set_text_fmt(id(v_batt_badge), "%d PACKS", count);
+          if (!multi) lv_label_set_text(id(v_info_badge), "");
+      # A pack that has just disappeared may be the page on screen.
+      - if:
+          condition:
+            lambda: 'return count < 2 && id(cur_page) == 1;'
+          then:
+            - lvgl.page.show: pg_main
+      - script.execute: update_dots
+      - script.execute: render_cells
+      - script.execute: render_link    # MAIN's bottom card depends on the pack count
+
+  # Picks the pack shown on CELL MONITOR and BATTERY INFO. The per-pack readings of the
+  # previous pack are blanked; that pack's next BATTERY frame (within a second)
+  # refills them.
+  - id: select_pack
+    mode: restart
+    parameters:
+      pack: int
+    then:
+      - lambda: |-
+          if (pack < 0 || pack >= (id(n_bat) > 1 ? id(n_bat) : 1)) pack = 0;
+          if (pack != id(sel_pack)) {
+            id(sel_pack) = pack;
+            id(cell_focus) = -1;
+            id(st_bcan) = -1;
+            struct { lv_obj_t* l; const char* t; } blank[] = {
+              {id(v_bms_row), "BMS STATUS  --"}, {id(v_health), "SOH --        REAL SOC --"},
+              {id(v_chg_lim), "CHARGE LIMIT       -- kW  |  -- A"},
+              {id(v_dis_lim), "DISCHARGE LIMIT    -- kW  |  -- A"},
+              {id(v_bal), "BALANCING  --"}, {id(v_canerr), "CAN ERRORS  --"},
+              {id(v_iso), "ISOLATION  --"},
+            };
+            for (auto& b : blank) lv_label_set_text(b.l, b.t);
+          }
+          if (id(n_bat) > 1) lv_label_set_text_fmt(id(v_info_badge), "PACK %d / %d", pack + 1, id(n_bat));
+          lv_label_set_text(id(c_tmp_v), "--\n--");
+          if (!std::isnan(id(p_tmin)[pack]) && !std::isnan(id(p_tmax)[pack]))
+            lv_label_set_text_fmt(id(c_tmp_v), "%.1f °C\n%.1f °C", id(p_tmin)[pack], id(p_tmax)[pack]);
+      - script.execute: render_cells
+      - script.execute: render_status
+
+  # Tapping MAX or MIN on MAIN: find the pack and cell holding that extreme, pick the
+  # pack and open the cell monitor with the cell emphasized.
+  - id: focus_extreme
+    mode: restart
+    parameters:
+      want_max: bool
+    then:
+      - lambda: |-
+          const int packs = id(n_bat) > 1 ? id(n_bat) : 1;
+          int bp = -1, bk = -1, bv = want_max ? -1 : 1 << 30;
+          for (int p = 0; p < packs && p < 3; p++) {
+            for (int k = 0; k < id(cell_n)[p]; k++) {
+              const int v = id(cell_mv)[p * 192 + k];
+              if (v < 1000) continue;
+              if (want_max ? v > bv : v < bv) { bv = v; bp = p; bk = k; }
+            }
+          }
+          if (bp < 0) return;
+          if (bp != id(sel_pack)) id(select_pack).execute(bp);
+          id(cell_focus) = bk;
+          id(cell_focus_kind) = want_max ? 1 : 2;
+      - lvgl.page.show: pg_cells
+      - script.execute: render_cells
+
+  - id: next_pack
+    mode: restart
+    then:
+      - if:
+          condition:
+            lambda: 'return id(n_bat) > 1;'
+          then:
+            - script.execute:
+                id: select_pack
+                pack: !lambda 'return (id(sel_pack) + 1) % id(n_bat);'
+
+  # Status header on MAIN, the heartbeat level, the emulator-wide rows of BATTERY INFO
+  # and the link rows of SYSTEM. Runs on every SYSTEM frame and on link changes.
+  - id: render_status
+    mode: restart
+    then:
+      - lambda: |-
+          auto put = [](lv_obj_t* l, const char* s) {
+            if (strcmp(lv_label_get_text(l), s) != 0) lv_label_set_text(l, s);
+          };
+          auto col = [](lv_obj_t* l, uint32_t c) {
+            const lv_color_t n = lv_color_hex(c);
+            if (!lv_color_eq(lv_obj_get_style_text_color(l, LV_PART_MAIN), n))
+              lv_obj_set_style_text_color(l, n, LV_PART_MAIN);
+          };
+          const bool on = id(be1_online).state;
+          // First match wins - the most severe condition names the state.
+          const char* txt; uint32_t c; int lvl;
+          if (!on)                                  { txt = "OFFLINE";    c = 0x${c_red};   lvl = 2; }
+          else if (id(st_estop) == 1)               { txt = "E-STOP";     c = 0x${c_red};   lvl = 2; }
+          else if (id(st_emu) == 2)                 { txt = "ERROR";      c = 0x${c_red};   lvl = 2; }
+          else if (id(st_sys) == 4)                 { txt = "FAULT";      c = 0x${c_red};   lvl = 2; }
+          else if (id(st_emu) == 1)                 { txt = "WARNING";    c = 0x${c_amber}; lvl = 1; }
+          else if (id(st_emu) == 3 || id(st_sys) == 5) { txt = "UPDATING"; c = 0x${c_amber}; lvl = 1; }
+          else if (id(st_pause) == 1 || id(st_pause) == 2) { txt = "PAUSED"; c = 0x${c_amber}; lvl = 1; }
+          else if (!id(m_live))                     { txt = "NO BATTERY"; c = 0x${c_amber}; lvl = 1; }
+          else                                      { txt = "OK";         c = 0x${c_green}; lvl = 0; }
+          put(id(v_status), txt);
+          col(id(v_status), c);
+          const lv_color_t hc = lv_color_hex(c);
+          if (!lv_color_eq(lv_obj_get_style_border_color(id(hdr), LV_PART_MAIN), hc))
+            lv_obj_set_style_border_color(id(hdr), hc, LV_PART_MAIN);
+          id(hdr_col) = c;
+          id(hb_level) = lvl;
+
+          // BATTERY INFO: contactors (engaged = closed) and the link rows.
+          const int k = id(st_cont);
+          put(id(v_cont), k == 1 ? "CLOSED" : k == 2 ? "OPEN" : k == 0 ? "STARTING" : "--");
+          col(id(v_cont), k == 1 ? 0x${c_green} : k == 2 ? 0x${c_red} : k == 0 ? 0x${c_amber} : 0x${c_muted});
+          auto state = [](int v, const char* good, const char* bad) -> std::string {
+            if (v < 0) return "--";
+            return v ? std::string("#${c_green} ") + good + "#" : std::string("#${c_red} ") + bad + "#";
+          };
+          put(id(v_links), ("BATTERY CAN  " + state(id(st_bcan), "OK", "LOST") +
+                            "   |   INVERTER CAN  " + state(id(st_inv), "OK", "LOST")).c_str());
+          // DC bus live is the normal running state - amber flags "HV present", not a fault.
+          const int dc = id(st_dcbus), es = id(st_estop);
+          const std::string dcs = dc < 0 ? "--" : dc ? "#${c_amber} LIVE#" : "DOWN";
+          const std::string ess = es < 0 ? "--" : es ? "#${c_red} LATCHED#" : "#${c_green} CLEAR#";
+          put(id(v_power_row), ("DC BUS  " + dcs + "   |   E-STOP  " + ess).c_str());
+
+          // SYSTEM: link state of this display
+          put(id(v_link), on ? "ONLINE" : "OFFLINE");
+          col(id(v_link), on ? 0x${c_green} : 0x${c_red});
+          char b[16];
+          snprintf(b, sizeof(b), "%u", (unsigned)id(rx_frames));
+          put(id(v_frames), b);
+      - script.execute: render_flow
+
+  # MAIN while there is nothing live to show: the reference's offline dashboard - arc,
+  # readings and header in red, the bottom card turned into an explanation.
+  - id: render_link
+    mode: restart
+    then:
+      - lambda: |-
+          const bool on = id(be1_online).state;
+          const bool live = on && id(m_live);
+          const bool multi = id(n_bat) > 1;
+          // Bottom card: one pack shows cell max / min / delta, several packs show the
+          // installation's energy and power limits. Temperature and the rules are shared.
+          auto show = [](lv_obj_t* o, bool s) {
+            if (s) lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+          };
+          for (auto* o : {id(v_cmax), id(v_cmin), id(v_delta)}) show(o, live && !multi);
+          for (auto* o : {id(v_mrem), id(v_mtot), id(v_mdis), id(v_mchg)}) show(o, live && multi);
+          for (auto* o : {id(v_temp), id(sep_a), id(sep_b)}) show(o, live);
+          if (live) {
+            lv_obj_add_flag(id(v_offline), LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_style_border_color(id(main_bottom), lv_color_hex(0x${c_line}), 0);
+            return;
+          }
+          const lv_color_t red = lv_color_hex(0x${c_red});
+          lv_arc_set_value(id(soc_arc), 0);
+          lv_obj_set_style_arc_color(id(soc_arc), red, LV_PART_INDICATOR);
+          lv_label_set_text(id(v_soc), "--%");
+          lv_label_set_text(id(v_volt), "--.- V");
+          lv_label_set_text(id(v_pow), "-- W");
+          lv_label_set_text(id(v_cur), "-- A");
+          lv_obj_t* reds[] = {id(v_soc), id(v_volt), id(v_pow), id(v_cur)};
+          for (auto* l : reds) lv_obj_set_style_text_color(l, red, 0);
+          std::string t;
+          if (!on) {
+            t = "NO LIVE DATA\nCRITICAL  No ESP-NOW frames from " + id(sel_name);
+          } else {
+            t = "ACTIVE EVENTS";
+            int shown = 0;
+            static const char* const SEV[5] = {"INFO", "DEBUG", "WARNING", "UPDATE", "ERROR"};
+            for (int k = 0; k < id(ev_have) && shown < 2; k++) {
+              const uint8_t s = id(ev_sev)[k], st = id(ev_state)[k];
+              if ((s != 2 && s != 4) || (st != 2 && st != 3) || id(ev_name)[k].empty()) continue;
+              t += std::string("\n") + SEV[s] + "  " + id(ev_name)[k];
+              shown++;
+            }
+            if (!shown) t += "\nCRITICAL  Battery data timeout";
+          }
+          lv_label_set_text(id(v_offline), t.c_str());
+          lv_obj_remove_flag(id(v_offline), LV_OBJ_FLAG_HIDDEN);
+          lv_obj_set_style_border_color(id(main_bottom), red, 0);
+          lv_obj_set_y(id(main_bottom), 365);
+          lv_obj_set_height(id(main_bottom), 84);
+          lv_obj_add_flag(id(warn_bar), LV_OBJ_FLAG_HIDDEN);
+      - script.execute: render_warning
+      - script.execute: render_status
+
+  # The amber (red for an error) notification above the page dots, shown while the
+  # newest active warning or error event is live. The bottom card gives up room for
+  # it exactly as in the reference.
+  - id: render_warning
+    mode: restart
+    then:
+      - lambda: |-
+          if (!(id(be1_online).state && id(m_live))) return;   // render_link owns the card
+          int w = -1;
+          for (int k = 0; k < id(ev_have); k++) {
+            const uint8_t s = id(ev_sev)[k], st = id(ev_state)[k];
+            if ((s == 2 || s == 4) && (st == 2 || st == 3) && !id(ev_name)[k].empty()) { w = k; break; }
+          }
+          lv_obj_t *mx = id(v_cmax), *mn = id(v_cmin);
+          // The two-line columns of the multi-pack card: top row, bottom row.
+          lv_obj_t* top[2] = {id(v_mrem), id(v_mdis)};
+          lv_obj_t* bot[2] = {id(v_mtot), id(v_mchg)};
+          if (w < 0) {
+            lv_obj_add_flag(id(warn_bar), LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_y(id(main_bottom), 365);
+            lv_obj_set_height(id(main_bottom), 74);
+            lv_obj_set_style_text_font(mx, &lv_font_montserrat_20, 0);
+            lv_obj_set_style_text_font(mn, &lv_font_montserrat_20, 0);
+            lv_obj_set_y(mx, 7);
+            lv_obj_set_y(mn, 38);
+            lv_obj_set_y(id(v_delta), 18);
+            lv_obj_set_y(id(v_temp), 14);
+            for (int k = 0; k < 2; k++) {
+              lv_obj_set_style_text_font(top[k], id(inter_18)->get_lv_font(), 0);
+              lv_obj_set_style_text_font(bot[k], id(inter_18)->get_lv_font(), 0);
+              lv_obj_set_y(top[k], 9);
+              lv_obj_set_y(bot[k], 39);
+            }
+            return;
+          }
+          const bool err = id(ev_sev)[w] == 4;
+          std::string nm = id(ev_name)[w];
+          for (auto& ch : nm) if (ch == '_') ch = ' ';
+          if (nm.size() > 30) nm = nm.substr(0, 29) + ".";
+          lv_label_set_text(id(v_warn), (nm + "   TAP FOR EVENT").c_str());
+          const lv_color_t c = lv_color_hex(err ? 0x${c_red} : 0x${c_amber});
+          lv_obj_set_style_text_color(id(v_warn), c, 0);
+          lv_obj_set_style_border_color(id(warn_bar), c, 0);
+          lv_obj_set_style_bg_color(id(warn_bar), lv_color_hex(err ? 0x2A0806 : 0x241700), 0);
+          lv_obj_remove_flag(id(warn_bar), LV_OBJ_FLAG_HIDDEN);
+          lv_obj_set_y(id(main_bottom), 356);
+          lv_obj_set_height(id(main_bottom), 58);
+          lv_obj_set_style_text_font(mx, &lv_font_montserrat_18, 0);
+          lv_obj_set_style_text_font(mn, &lv_font_montserrat_18, 0);
+          lv_obj_set_y(mx, 3);
+          lv_obj_set_y(mn, 29);
+          lv_obj_set_y(id(v_delta), 11);
+          lv_obj_set_y(id(v_temp), 8);
+          for (int k = 0; k < 2; k++) {
+            lv_obj_set_style_text_font(top[k], id(inter_16)->get_lv_font(), 0);
+            lv_obj_set_style_text_font(bot[k], id(inter_16)->get_lv_font(), 0);
+            lv_obj_set_y(top[k], 5);
+            lv_obj_set_y(bot[k], 30);
+          }
+
+  # Header direction text and flow arrow. The arrow never animates - it only turns;
+  # the energy flow is animated inside the battery by paint_battery.
+  - id: render_flow
+    mode: restart
+    then:
+      - lambda: |-
+          const bool live = id(be1_online).state && id(m_live);
+          const int f = live ? id(m_flow) : 0;
+          const lv_color_t c = lv_color_hex(!live ? 0x${c_red} : f > 0 ? 0x${c_green} :
+                                            f < 0 ? 0x${c_blue} : id(hdr_col));
+          const char* t = !live ? "NO LIVE DATA" : f > 0 ? "CHARGING" : f < 0 ? "DISCHARGING" : "IDLE";
+          if (strcmp(lv_label_get_text(id(v_dir)), t) != 0) lv_label_set_text(id(v_dir), t);
+          if (!lv_color_eq(lv_obj_get_style_text_color(id(v_dir), LV_PART_MAIN), c))
+            lv_obj_set_style_text_color(id(v_dir), c, 0);
+          // Positive current charges the pack, so that arrow points left, into the battery.
+          // (A line widget's id is ESPHome's wrapper; ->obj is the LVGL object.)
+          lv_obj_t* arrows[2] = {id(arrow_in)->obj, id(arrow_out)->obj};
+          for (int k = 0; k < 2; k++) {
+            const bool on = k == 0 ? f > 0 : f < 0;
+            if (!on) { lv_obj_add_flag(arrows[k], LV_OBJ_FLAG_HIDDEN); continue; }
+            if (!lv_color_eq(lv_obj_get_style_line_color(arrows[k], LV_PART_MAIN), c))
+              lv_obj_set_style_line_color(arrows[k], c, 0);
+            lv_obj_remove_flag(arrows[k], LV_OBJ_FLAG_HIDDEN);
+          }
+          // Restart the fill animation only when the direction actually changes - this
+          // runs every second with the status, and must not keep resetting it.
+          static int last_f = 99;
+          if (f != last_f) { last_f = f; id(flow_phase) = 0; }
+      - script.execute: paint_battery
+
+  # The four blocks inside the header battery: charging fills them 1 -> 4, discharging
+  # empties them 4 -> 1, standby shows them steady.
+  - id: paint_battery
+    mode: restart
+    then:
+      - lambda: |-
+          lv_obj_t* c[4] = {id(bcell0), id(bcell1), id(bcell2), id(bcell3)};
+          const bool live = id(be1_online).state && id(m_live);
+          const int f = live ? id(m_flow) : 0;
+          const int lit = f > 0 ? id(flow_phase) + 1 : 4 - id(flow_phase);
+          const lv_color_t fc = lv_color_hex(f < 0 ? 0x${c_blue} : 0x${c_green});
+          for (int k = 0; k < 4; k++) {
+            const lv_opa_t o = f == 0 ? LV_OPA_70 : (k < lit ? LV_OPA_COVER : LV_OPA_20);
+            if (!lv_color_eq(lv_obj_get_style_bg_color(c[k], LV_PART_MAIN), fc)) lv_obj_set_style_bg_color(c[k], fc, 0);
+            if (lv_obj_get_style_bg_opa(c[k], LV_PART_MAIN) != o) lv_obj_set_style_bg_opa(c[k], o, 0);
+          }
+
+  # CELL MONITOR cards, tags and the note line; the bars themselves are painted by the
+  # chart's draw event from the same arrays, so this only has to invalidate it.
+  - id: render_cells
+    mode: restart
+    then:
+      - lambda: |-
+          const int b = id(sel_pack);
+          const int n = id(cell_n)[b];
+          const int base = b * 192;
+          const bool multi = id(n_bat) > 1;
+          int lo = 1 << 30, hi = -1, ilo = -1, ihi = -1, nbal = 0;
+          for (int k = 0; k < n; k++) {
+            const int v = id(cell_mv)[base + k];
+            if (id(cell_bal)[base + k]) nbal++;
+            if (v < 1000) continue;                  // not reported (yet)
+            if (v < lo) { lo = v; ilo = k; }
+            if (v > hi) { hi = v; ihi = k; }
+          }
+          id(c_ilo) = ilo;
+          id(c_ihi) = ihi;
+          if (multi) lv_label_set_text_fmt(id(v_cells_badge), "PACK %d / %d", b + 1, id(n_bat));
+          else if (n > 0) lv_label_set_text_fmt(id(v_cells_badge), "%d CELLS", n);
+          else lv_label_set_text(id(v_cells_badge), "");
+          const int lim_hi = id(cell_lim_hi)[b] > 0 ? id(cell_lim_hi)[b] : 4250;
+          const int lim_lo = id(cell_lim_lo)[b] > 0 ? id(cell_lim_lo)[b] : 3000;
+          const bool fmin = ilo >= 0 && lo < lim_lo, fmax = ihi >= 0 && hi > lim_hi;
+          id(c_fault) = (fmin ? 1 : 0) | (fmax ? 2 : 0);
+          lv_obj_invalidate(id(cell_plot));
+          if (ihi < 0) {
+            lv_label_set_text(id(c_min_v), "--\nCELL --");
+            lv_label_set_text(id(c_max_v), "--\nCELL --");
+            lv_label_set_text(id(c_dlt_v), "Δ -- mV");
+            lv_obj_add_flag(id(v_min_tag), LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(id(v_max_tag), LV_OBJ_FLAG_HIDDEN);
+            lv_label_set_text(id(v_focus), n > 0 ? "WAITING FOR CELL VOLTAGES" : "NO CELL DATA YET");
+            lv_obj_set_style_text_color(id(v_focus), lv_color_hex(0x${c_muted}), 0);
+            lv_obj_remove_flag(id(v_focus), LV_OBJ_FLAG_HIDDEN);
+            return;
+          }
+          const uint32_t cmin = fmin ? 0x${c_red} : 0x${c_blue}, cmax = fmax ? 0x${c_red} : 0x${c_green};
+          lv_label_set_text_fmt(id(c_min_v), "%d mV\nCELL %d", lo, ilo + 1);
+          lv_label_set_text_fmt(id(c_max_v), "%d mV\nCELL %d", hi, ihi + 1);
+          lv_obj_set_style_text_color(id(c_min_v), lv_color_hex(cmin), 0);
+          lv_obj_set_style_text_color(id(c_max_v), lv_color_hex(cmax), 0);
+          const int d = hi - lo;
+          lv_label_set_text_fmt(id(c_dlt_v), "Δ %d mV", d);
+          lv_obj_set_style_text_color(id(c_dlt_v),
+              lv_color_hex(d < 100 ? 0x${c_green} : d <= 300 ? 0x${c_amber} : 0x${c_red}), 0);
+
+          // Tags over the lowest / highest bar. Same geometry as the draw event; two
+          // nearby extremes sit side by side instead of on top of each other.
+          int slot = 480 / n; if (slot < 1) slot = 1;
+          int bw = slot >= 2 ? slot - 1 : 1; if (bw > 18) bw = 18;
+          const int x0 = (480 - slot * n) / 2 + (slot - bw) / 2;
+          auto clampi = [](int v, int a, int z) { return v < a ? a : (v > z ? z : v); };
+          int mx = clampi(x0 + ilo * slot - 12, 2, 414), Mx = clampi(x0 + ihi * slot - 12, 2, 414);
+          if (abs(mx - Mx) < 68) {
+            const int pl = clampi((mx + Mx) / 2 - 58, 2, 356);
+            mx = pl; Mx = pl + 64;
+          }
+          lv_label_set_text_fmt(id(v_min_tag), "%d MIN", ilo + 1);
+          lv_label_set_text_fmt(id(v_max_tag), "%d MAX", ihi + 1);
+          lv_obj_set_x(id(v_min_tag), mx);
+          lv_obj_set_x(id(v_max_tag), Mx);
+          lv_obj_set_style_text_color(id(v_min_tag), lv_color_hex(cmin), 0);
+          lv_obj_set_style_text_color(id(v_max_tag), lv_color_hex(cmax), 0);
+          lv_obj_remove_flag(id(v_min_tag), LV_OBJ_FLAG_HIDDEN);
+          lv_obj_remove_flag(id(v_max_tag), LV_OBJ_FLAG_HIDDEN);
+
+          // Note line under the chart: the selected cell, else balancing, else a hint.
+          const int f = id(cell_focus);
+          if (f >= 0 && f < n) {
+            const int fk = id(cell_focus_kind);
+            const char* what = fk == 1 ? "SELECTED MAX  " : fk == 2 ? "SELECTED MIN  " : "";
+            lv_label_set_text_fmt(id(v_focus), "%sCELL %d  %d mV%s", what, f + 1, id(cell_mv)[base + f],
+                                  id(cell_bal)[base + f] ? "  BALANCING" : "");
+            lv_obj_set_style_text_color(id(v_focus), lv_color_hex(0xFFFFFF), 0);
+          } else if (nbal > 0) {
+            lv_label_set_text_fmt(id(v_focus), "%d CELL%s BALANCING", nbal, nbal == 1 ? "" : "S");
+            lv_obj_set_style_text_color(id(v_focus), lv_color_hex(0x${c_soft_amber}), 0);
+          } else if (multi) {
+            lv_label_set_text_fmt(id(v_focus), "PACK %d OF %d  -  TAP THE TITLE FOR THE NEXT", b + 1, id(n_bat));
+            lv_obj_set_style_text_color(id(v_focus), lv_color_hex(0x${c_muted}), 0);
+          } else {
+            lv_label_set_text(id(v_focus), "TAP A BAR TO READ ITS CELL");
+            lv_obj_set_style_text_color(id(v_focus), lv_color_hex(0x${c_muted}), 0);
+          }
+          lv_obj_remove_flag(id(v_focus), LV_OBJ_FLAG_HIDDEN);
+
+  # EVENTS list: ten cards built once, then refilled. Runs on every committed batch, when
+  # the page is opened, and on a timer while it is on screen so the ages stay honest.
+  - id: render_events
+    mode: restart
+    then:
+      - lambda: |-
+          static lv_obj_t *card[10], *hdr[10], *age[10], *msg[10];
+          if (card[0] == nullptr) {
+            const lv_font_t* f14 = id(inter_14)->get_lv_font();
+            for (int k = 0; k < 10; k++) {
+              lv_obj_t* c = card[k] = lv_obj_create(id(ev_list));
+              lv_obj_set_size(c, 430, 68);
+              lv_obj_set_style_bg_color(c, lv_color_hex(0x${c_card}), 0);
+              lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
+              lv_obj_set_style_border_color(c, lv_color_hex(0x${c_line}), 0);
+              lv_obj_set_style_border_width(c, 1, 0);
+              lv_obj_set_style_radius(c, 7, 0);
+              lv_obj_set_style_pad_all(c, 0, 0);
+              lv_obj_set_style_shadow_width(c, 0, 0);
+              // Not clickable: a press falls through to the list, which scrolls.
+              lv_obj_remove_flag(c, LV_OBJ_FLAG_CLICKABLE);
+              lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
+              hdr[k] = lv_label_create(c);
+              lv_obj_set_pos(hdr[k], 8, 6);
+              lv_obj_set_width(hdr[k], 322);
+              lv_label_set_long_mode(hdr[k], LV_LABEL_LONG_MODE_DOTS);
+              age[k] = lv_label_create(c);
+              lv_obj_set_pos(age[k], 330, 6);
+              lv_obj_set_width(age[k], 92);
+              lv_obj_set_style_text_align(age[k], LV_TEXT_ALIGN_RIGHT, 0);
+              lv_obj_set_style_text_color(age[k], lv_color_hex(0x${c_muted}), 0);
+              msg[k] = lv_label_create(c);
+              lv_obj_set_pos(msg[k], 8, 26);
+              lv_obj_set_size(msg[k], 414, 36);
+              lv_label_set_long_mode(msg[k], LV_LABEL_LONG_MODE_DOTS);
+              lv_obj_set_style_text_line_space(msg[k], 2, 0);
+              for (lv_obj_t* l : {hdr[k], age[k], msg[k]}) lv_obj_set_style_text_font(l, f14, 0);
+              lv_obj_add_flag(c, LV_OBJ_FLAG_HIDDEN);
+            }
+          }
+          // EVENTS_LEVEL_TYPE, upstream order: INFO, DEBUG, WARNING, UPDATE, ERROR
+          static const char* const SEV[5] = {"INFO", "DEBUG", "WARNING", "UPDATE", "ERROR"};
+          static const uint32_t SCOL[5] = {0x${c_green}, 0x${c_muted}, 0x${c_amber}, 0x${c_blue}, 0x${c_red}};
+          // Emulator uptime now = last reported uptime + local time since.
+          const uint32_t now_s = id(emu_uptime) + (millis() - id(emu_uptime_at)) / 1000;
+          int shown = 0, active = 0, errors = 0;
+          for (int k = 0; k < 10; k++) {
+            // A slot never filled - a lost frame in this batch, or a short first batch.
+            if (k >= id(ev_have) || id(ev_name)[k].empty()) { lv_obj_add_flag(card[k], LV_OBJ_FLAG_HIDDEN); continue; }
+            shown++;
+            const uint8_t sv = id(ev_sev)[k], st = id(ev_state)[k];
+            const bool on = st == 2 || st == 3;           // ACTIVE / ACTIVE_LATCHED
+            if (on && (sv == 2 || sv == 4)) active++;
+            if (on && sv == 4) errors++;
+            const uint32_t sc = sv < 5 ? SCOL[sv] : 0xFFFFFF;
+            char b[96];
+            snprintf(b, sizeof(b), "%d  %s  %s", shown, sv < 5 ? SEV[sv] : "EVENT", id(ev_name)[k].c_str());
+            lv_label_set_text(hdr[k], b);
+            lv_obj_set_style_text_color(hdr[k], lv_color_hex(sc), 0);
+            // Resolution drops with age: seconds, then minutes, hours, days.
+            const uint32_t t = id(ev_ts)[k];
+            const uint32_t a = now_s > t ? now_s - t : 0;
+            char ago[16];
+            if (a < 10)          snprintf(ago, sizeof(ago), "now");
+            else if (a < 60)     snprintf(ago, sizeof(ago), "%us", (unsigned)a);
+            else if (a < 3600)   snprintf(ago, sizeof(ago), "%um", (unsigned)(a / 60));
+            else if (a < 86400)  snprintf(ago, sizeof(ago), "%uh%02um", (unsigned)(a / 3600), (unsigned)((a / 60) % 60));
+            else                 snprintf(ago, sizeof(ago), "%ud%02uh", (unsigned)(a / 86400), (unsigned)((a / 3600) % 24));
+            snprintf(b, sizeof(b), "x%u  %s", (unsigned)id(ev_cnt)[k], ago);
+            lv_label_set_text(age[k], b);
+            std::string m = id(ev_msg)[k].empty() ? id(ev_name)[k] : id(ev_msg)[k];
+            if (st == 1) m = "Cleared - " + m;
+            else if (st == 3) m = "Latched - " + m;
+            else if (st == 0) m = "Pending - " + m;
+            if (id(ev_data)[k]) m += "  [" + std::to_string(id(ev_data)[k]) + "]";
+            lv_label_set_text(msg[k], m.c_str());
+            lv_obj_set_style_text_color(msg[k], lv_color_hex(on ? 0xFFFFFF : 0x${c_muted}), 0);
+            lv_obj_set_style_border_color(card[k], lv_color_hex(on ? sc : 0x${c_line}), 0);
+            lv_obj_remove_flag(card[k], LV_OBJ_FLAG_HIDDEN);
+          }
+          if (shown) lv_label_set_text_fmt(id(v_ev_count), "%d EVENT%s  -  NEWEST FIRST", shown, shown == 1 ? "" : "S");
+          else lv_label_set_text(id(v_ev_count), id(be1_online).state ? "LOADING EVENTS..." : "WAITING FOR THE EMULATOR");
+          if (active) lv_label_set_text_fmt(id(v_ev_badge), "%d ACTIVE", active);
+          else lv_label_set_text(id(v_ev_badge), "");
+          lv_obj_set_style_text_color(id(v_ev_badge), lv_color_hex(errors ? 0x${c_red} : 0x${c_amber}), 0);
+          if (shown == 0 && id(ev_seen)) lv_obj_remove_flag(id(v_ev_empty), LV_OBJ_FLAG_HIDDEN);
+          else lv_obj_add_flag(id(v_ev_empty), LV_OBJ_FLAG_HIDDEN);
+          if (shown > 4) lv_obj_remove_flag(id(v_ev_more), LV_OBJ_FLAG_HIDDEN);
+          else lv_obj_add_flag(id(v_ev_more), LV_OBJ_FLAG_HIDDEN);
+
+  # Page bookkeeping, called from every page's on_load.
+  - id: page_loaded
+    mode: restart
+    parameters:
+      page: int
+    then:
+      - lambda: |-
+          id(cur_page) = page;
+          // MAIN carries the status in its header, so the heartbeat sits out there.
+          if (page == 0) lv_obj_add_flag(id(hb), LV_OBJ_FLAG_HIDDEN);
+          else lv_obj_remove_flag(id(hb), LV_OBJ_FLAG_HIDDEN);
+          if (page != 2) id(cell_focus) = -1;     // a selection belongs to one visit
+      - script.execute: update_dots
+      - if:
+          condition:
+            lambda: 'return page == 2;'
+          then:
+            - script.execute: render_cells
+      - if:
+          condition:
+            lambda: 'return page == 3;'
+          then:
+            - script.execute: render_events
+
+  # Page dots, centred under the pages that are actually in the rotation.
+  - id: update_dots
+    mode: restart
+    then:
+      - lambda: |-
+          lv_obj_t* d[8] = {id(dot0), id(dot1), id(dot2), id(dot3), id(dot4), id(dot5), id(dot6), id(dot7)};
+          const bool multi = id(n_bat) > 1;
+          const int n = multi ? 8 : 7;
+          int x = 240 - (n * 23 - 11) / 2;
+          for (int k = 0; k < 8; k++) {
+            if (k == 1 && !multi) { lv_obj_add_flag(d[k], LV_OBJ_FLAG_HIDDEN); continue; }
+            lv_obj_remove_flag(d[k], LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_x(d[k], x);
+            x += 23;
+            lv_obj_set_style_bg_color(d[k], lv_color_hex(k == id(cur_page) ? 0x${c_green} : 0x${c_dot}), 0);
+          }
+
+  # DISPLAY MENU feedback line, cleared after a few seconds.
+  - id: toast
+    mode: restart
+    parameters:
+      text: string
+    then:
+      - lvgl.label.update:
+          id: v_toast
+          text: !lambda 'return text;'
+          hidden: false
+      - delay: 4s
+      - lvgl.widget.hide: v_toast
+
+  # Backlight back on after sleep, at the level stored by the SYSTEM > Display slider.
+  - id: wake_backlight
+    mode: restart
+    then:
+      - light.turn_on:
+          id: display_backlight
+          transition_length: 300ms
+          brightness: !lambda 'return std::isnan(id(bl_level).state) ? 1.0f : id(bl_level).state / 100.0f;'
+
+  # SYSTEM > Display "FREE HEAP": internal RAM, plus PSRAM once that has reported.
+  - id: render_heap
+    then:
+      - lvgl.label.update:
+          id: v_dheap
+          text: !lambda |-
+            const float f = id(dsp_free).state, p = id(dsp_psram).state;
+            if (std::isnan(f)) return std::string("--");
+            char b[40];
+            if (std::isnan(p))
+              snprintf(b, sizeof(b), "%.1f kB", f / 1024.0f);
+            else
+              snprintf(b, sizeof(b), "%.1f kB | PSRAM %.2f MB", f / 1024.0f, p / 1048576.0f);
+            return std::string(b);
+
+  - id: screen_off
+    mode: restart
+    then:
+      - light.turn_off: { id: display_backlight, transition_length: 1000ms }
+      - lvgl.pause:
+
+  - id: be1_watchdog
+    mode: restart
+    then:
+      - delay: 5s          # scalar frames arrive every 1 s; broadcasts are unacked,
+                           # so allow a few consecutive losses before crying offline
+      - binary_sensor.template.publish: { id: be1_online, state: false }
+
+  # The emulator keeps talking when it loses its battery, it just stops sending the
+  # live block. Without one for this long, MAIN shows the data as gone.
+  - id: live_watchdog
+    mode: restart
+    then:
+      - delay: 10s
+      - lambda: 'id(m_live) = false;'
+      - script.execute: render_link
+
+interval:
+  # Header battery: fills (charging) or empties (discharging) block by block.
+  - interval: 480ms
+    then:
+      - if:
+          condition:
+            and:
+              - not:
+                  lvgl.is_paused:
+              - lambda: 'return id(cur_page) == 0 && id(m_flow) != 0 && id(m_live) && id(be1_online).state;'
+          then:
+            - lambda: 'id(flow_phase) = (id(flow_phase) + 1) % 4;'
+            - script.execute: paint_battery
+  # Heartbeat in the bottom-right corner of every page but MAIN: slow green while all
+  # is well, fast amber on a warning, fast red on a fault or while offline.
+  - interval: 325ms
+    then:
+      - if:
+          condition:
+            and:
+              - not:
+                  lvgl.is_paused:
+              - lambda: 'return id(cur_page) != 0;'
+          then:
+            - lambda: |-
+                id(hb_tick)++;
+                if (id(hb_level) == 0 && (id(hb_tick) & 1)) return;
+                id(hb_on) = !id(hb_on);
+                const lv_color_t c = lv_color_hex(id(hb_level) >= 2 ? 0x${c_red} :
+                                                  id(hb_level) == 1 ? 0x${c_amber} : 0x${c_green});
+                lv_obj_set_style_bg_color(id(hb), c, 0);
+                lv_obj_set_style_shadow_color(id(hb), c, 0);
+                lv_obj_set_style_bg_opa(id(hb), id(hb_on) ? LV_OPA_COVER : LV_OPA_30, 0);
+                lv_obj_set_style_shadow_opa(id(hb), id(hb_on) ? LV_OPA_60 : LV_OPA_10, 0);
+  # Event ages, re-rendered while the list is on screen. Ages are coarse above a
+  # minute, so 5 s is finer than the display can show.
+  - interval: 5s
+    then:
+      - if:
+          condition:
+            and:
+              - not:
+                  lvgl.is_paused:
+              - lambda: 'return id(cur_page) == 3;'
+          then:
+            - script.execute: render_events
+
+binary_sensor:
+  - platform: template
+    id: be1_online
+    name: "BE1 Online"
+    device_class: connectivity
+    on_state:
+      - script.execute: render_link
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+      id: ip_address
+      entity_category: diagnostic
+      on_value:
+        - lvgl.label.update:
+            id: v_dip
+            text: !lambda 'return x;'
+    ssid:
+      name: "Connected SSID"
+      entity_category: diagnostic
+      on_value:
+        - lvgl.label.update:
+            id: v_dssid
+            text: !lambda 'return x;'
+    mac_address:
+      name: "Mac Address"
+      entity_category: diagnostic
+      on_value:
+        - lvgl.label.update:
+            id: v_dmac
+            text: !lambda 'return x;'
+
+# --- This display's own diagnostics, shown on SYSTEM > Display --------------------
+debug:
+  update_interval: 5s
+
+sensor:
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    id: wifi_rssi
+    update_interval: 10s
+    entity_category: diagnostic
+    on_value:
+      - lvgl.label.update:
+          id: v_drssi
+          text:
+            format: "%.0f dBm"
+            args: [ x ]
+  - platform: uptime
+    id: dsp_uptime                # internal: only the Display card uses it
+    update_interval: 1s
+    on_value:
+      - lvgl.label.update:
+          id: v_dup
+          text: !lambda |-
+            const uint32_t s = (uint32_t) x;
+            char b[24];
+            if (s >= 86400)
+              snprintf(b, sizeof(b), "%ud %02u:%02u:%02u", (unsigned)(s / 86400),
+                       (unsigned)((s / 3600) % 24), (unsigned)((s / 60) % 60), (unsigned)(s % 60));
+            else
+              snprintf(b, sizeof(b), "%02u:%02u:%02u", (unsigned)(s / 3600),
+                       (unsigned)((s / 60) % 60), (unsigned)(s % 60));
+            return std::string(b);
+  # Internal RAM is what the RGB panel, LVGL and Wi-Fi compete for; PSRAM for context.
+  - platform: debug
+    free:
+      id: dsp_free
+      on_value: [ script.execute: render_heap ]
+    psram:
+      id: dsp_psram
+      on_value: [ script.execute: render_heap ]
+
+# Backlight level, set with the slider on SYSTEM > Display. Stored in flash and restored
+# at boot; the slider itself stops at 90 %.
+number:
+  - platform: lvgl
+    widget: bl_slider
+    id: bl_level
+    name: "Display brightness"
+    restore_value: true
+    on_value:
+      - lvgl.label.update:
+          id: v_bl
+          text:
+            format: "BACKLIGHT %.0f%%"
+            args: [ x ]
+      # While the screen sleeps the level is only stored; waking applies it.
+      - if:
+          condition:
+            light.is_on: display_backlight
+          then:
+            - light.turn_on:
+                id: display_backlight
+                brightness: !lambda 'return x / 100.0f;'
+                transition_length: 150ms
+
+# --- LVGL: the reference design ------------------------------------------------
+lvgl:
+  displays:
+    - my_display
+    - vnc_display
+  touchscreens:
+    - my_touch
+    - vnc_touch
+  buffer_size: 100%
+  color_depth: 16
+  default_font: inter_16
+  bottom_layer:
+    bg_color: "0x${c_bg}"
+    bg_opa: COVER
+  on_idle:
+    timeout: 3600s
+    then:
+      - light.turn_off: { id: display_backlight, transition_length: 2000ms }
+      - lvgl.pause:
+  theme:
+    dark_mode: true
+    # uActionButton(): a card with a coloured border and a centred label.
+    button:
+      bg_color: "0x${c_card}"
+      bg_opa: COVER
+      border_width: 1
+      border_color: "0x${c_blue}"
+      radius: 9
+      shadow_width: 0
+      pad_all: 0
+      text_font: inter_16
+      text_color: "0x${c_blue}"
+      pressed:
+        bg_color: 0x0E2A40
+  style_definitions:
+    - id: st_page            # every page: the reference's near-black navy
+      bg_color: "0x${c_bg}"
+      bg_opa: COVER
+      border_width: 0
+      radius: 0
+      pad_all: 0
+      text_color: 0xFFFFFF
+    - id: st_card            # uCard(): navy card with a 1 px slate border
+      bg_color: "0x${c_card}"
+      bg_opa: COVER
+      border_color: "0x${c_line}"
+      border_width: 1
+      border_opa: COVER
+      radius: 12
+      pad_all: 0
+      shadow_width: 0
+      text_color: 0xFFFFFF
+    - id: st_title           # uPageTitle(): the green-rimmed card on top of each page
+      bg_color: "0x${c_card}"
+      bg_opa: COVER
+      border_color: "0x${c_green}"
+      border_width: 1
+      border_opa: COVER
+      radius: 12
+      pad_all: 0
+      shadow_width: 0
+      text_color: "0x${c_green}"
+    - id: st_rule            # 1 px separators
+      bg_color: "0x${c_line}"
+      bg_opa: COVER
+      border_width: 0
+      radius: 0
+      pad_all: 0
+    - id: st_bcell           # the four blocks inside the header battery
+      width: 9
+      height: 17
+      bg_color: "0x${c_green}"
+      bg_opa: 70%
+      border_width: 0
+      radius: 1
+      pad_all: 0
+    - id: st_dot             # uFooter(): page dots
+      y: 460
+      width: 12
+      height: 12
+      radius: CIRCLE
+      bg_color: "0x${c_dot}"
+      bg_opa: COVER
+      border_width: 0
+      pad_all: 0
+      shadow_width: 0
+  top_layer:
+    widgets:
+      # One row of dots for all pages, re-centred by update_dots when the BATTERIES
+      # page joins or leaves the rotation.
+      - obj: { id: dot0, styles: st_dot, x: 160, ext_click_area: 6, on_click: [ lvgl.page.show: pg_main ] }
+      - obj: { id: dot1, styles: st_dot, x: 183, ext_click_area: 6, hidden: true, on_click: [ lvgl.page.show: pg_batt ] }
+      - obj: { id: dot2, styles: st_dot, x: 183, ext_click_area: 6, on_click: [ lvgl.page.show: pg_cells ] }
+      - obj: { id: dot3, styles: st_dot, x: 206, ext_click_area: 6, on_click: [ lvgl.page.show: pg_events ] }
+      - obj: { id: dot4, styles: st_dot, x: 229, ext_click_area: 6, on_click: [ lvgl.page.show: pg_info ] }
+      - obj: { id: dot5, styles: st_dot, x: 252, ext_click_area: 6, on_click: [ lvgl.page.show: pg_energy ] }
+      - obj: { id: dot6, styles: st_dot, x: 275, ext_click_area: 6, on_click: [ lvgl.page.show: pg_menu ] }
+      - obj: { id: dot7, styles: st_dot, x: 298, ext_click_area: 6, on_click: [ lvgl.page.show: pg_system ] }
+      - obj:
+          id: hb
+          x: 464
+          y: 464
+          width: 8
+          height: 8
+          radius: CIRCLE
+          bg_color: "0x${c_green}"
+          bg_opa: COVER
+          border_width: 0
+          shadow_color: "0x${c_green}"
+          shadow_width: 7
+          shadow_opa: 60%
+          clickable: false
+          hidden: true
+  pages:
+    # =========================================================================
+    # MAIN - uBuildDashboard()
+    # =========================================================================
+    - id: pg_main
+      styles: st_page
+      on_load:
+        - script.execute: { id: page_loaded, page: 0 }
+      # A swipe swallows the rest of its touch. LVGL sends CLICKED on release even
+      # after a gesture, so without this a swipe that starts on a button would also
+      # press it.
+      on_swipe_left: &swipe_next
+        - lambda: 'lv_indev_wait_release(lv_indev_active());'
+        - lvgl.page.next: { animation: MOVE_LEFT, time: 250ms }
+      on_swipe_right: &swipe_prev
+        - lambda: 'lv_indev_wait_release(lv_indev_active());'
+        - lvgl.page.previous: { animation: MOVE_RIGHT, time: 250ms }
+      widgets:
+        # ---- header: battery + flow arrow | direction | STATUS ----
+        # The rim takes the colour of the emulator status. Tap it for SYSTEM, where
+        # the emulator is chosen (the reference opens its connection setup here).
+        - obj:
+            id: hdr
+            styles: st_card
+            scrollable: false
+            x: 10
+            y: 8
+            width: 460
+            height: 55
+            border_color: "0x${c_green}"
+            on_click:
+              - lvgl.page.show: pg_system
+            widgets:
+              - obj:
+                  x: 14
+                  y: 13
+                  width: 62
+                  height: 29
+                  radius: 5
+                  bg_opa: TRANSP
+                  border_color: "0x${c_green}"
+                  border_width: 2
+                  pad_all: 0
+                  clickable: false
+                  widgets:
+                    - obj: { id: bcell0, styles: st_bcell, x: 3, y: 4, clickable: false }
+                    - obj: { id: bcell1, styles: st_bcell, x: 15, y: 4, clickable: false }
+                    - obj: { id: bcell2, styles: st_bcell, x: 27, y: 4, clickable: false }
+                    - obj: { id: bcell3, styles: st_bcell, x: 39, y: 4, clickable: false }
+              - obj: { x: 76, y: 21, width: 7, height: 11, radius: 2, bg_color: "0x${c_green}", bg_opa: COVER, border_width: 0, pad_all: 0, clickable: false }
+              # One polyline per direction (retracing the head is invisible), so turning
+              # the arrow is a show / hide instead of moving points around.
+              - line: { id: arrow_in,  x: 87, y: 17, points: [[10, 0], [0, 9], [10, 18], [0, 9], [27, 9]], line_width: 5, line_rounded: true, line_color: "0x${c_green}", hidden: true }
+              - line: { id: arrow_out, x: 87, y: 17, points: [[17, 0], [27, 9], [17, 18], [27, 9], [0, 9]], line_width: 5, line_rounded: true, line_color: "0x${c_blue}", hidden: true }
+              - label: { id: v_dir, x: 122, y: 16, width: 187, text: "NO LIVE DATA", text_font: inter_18, text_color: "0x${c_red}" }
+              - obj: { styles: st_rule, x: 311, y: 10, width: 1, height: 35, clickable: false }
+              - label: { x: 323, y: 5, text: "STATUS", text_font: inter_14, text_color: "0x${c_muted}" }
+              - label: { id: v_status, x: 323, y: 25, width: 125, text: "WAITING", text_font: inter_16, text_color: "0x${c_green}" }
+        # ---- SOC arc with pack voltage ----
+        - obj:
+            styles: st_card
+            scrollable: false
+            x: 10
+            y: 72
+            width: 268
+            height: 284
+            widgets:
+              - arc:
+                  id: soc_arc
+                  x: 10
+                  y: 8
+                  width: 248
+                  height: 248
+                  start_angle: 135
+                  end_angle: 45
+                  rotation: 0
+                  min_value: 0
+                  max_value: 100
+                  value: 0
+                  adjustable: false
+                  bg_opa: TRANSP
+                  border_width: 0
+                  pad_all: 0
+                  arc_width: 22
+                  arc_color: "0x${c_arc_bg}"
+                  arc_rounded: true
+                  indicator:
+                    arc_width: 22
+                    arc_color: "0x${c_green}"
+                    arc_rounded: true
+              - label: { id: v_soc, x: 15, y: 84, width: 238, text: "--%", text_align: CENTER, text_font: inter_d48, text_color: "0x${c_red}" }
+              - obj: { styles: st_rule, x: 54, y: 153, width: 160, height: 1 }
+              - label: { id: v_volt, x: 15, y: 164, width: 238, text: "--.- V", text_align: CENTER, text_font: inter_d32, text_color: "0x${c_red}" }
+        # ---- POWER / CURRENT ----
+        - obj:
+            styles: st_card
+            scrollable: false
+            x: 288
+            y: 72
+            width: 182
+            height: 135
+            radius: 10
+            widgets:
+              - label: { x: 10, y: 5, text: "POWER", text_font: inter_14 }
+              - label: { id: v_pow, x: 0, y: 44, width: 182, text: "-- W", text_align: CENTER, long_mode: CLIP, text_font: inter_d48, text_color: "0x${c_red}" }
+        - obj:
+            styles: st_card
+            scrollable: false
+            x: 288
+            y: 217
+            width: 182
+            height: 139
+            radius: 10
+            widgets:
+              - label: { x: 10, y: 5, text: "CURRENT", text_font: inter_14 }
+              - label: { id: v_cur, x: 0, y: 46, width: 182, text: "-- A", text_align: CENTER, long_mode: CLIP, text_font: inter_d48, text_color: "0x${c_red}" }
+        # ---- cell max / min | delta | temperature ----
+        # The readings need no headings (reference v15.8), which leaves room for large
+        # figures. MAX and MIN open the cell monitor on that very cell.
+        # With several packs the first two columns show the installation's scaled
+        # energy and its power limits instead (render_link swaps the two sets).
+        - obj:
+            id: main_bottom
+            styles: st_card
+            scrollable: false
+            x: 10
+            y: 365
+            width: 460
+            height: 74
+            widgets:
+              - label:
+                  id: v_cmax
+                  x: 4
+                  y: 7
+                  width: 142
+                  text: "MAX -- V"
+                  text_align: CENTER
+                  text_font: montserrat_20
+                  text_color: "0x${c_muted}"
+                  on_click:
+                    - script.execute: { id: focus_extreme, want_max: true }
+              - label:
+                  id: v_cmin
+                  x: 4
+                  y: 38
+                  width: 142
+                  text: "MIN  -- V"
+                  text_align: CENTER
+                  text_font: montserrat_20
+                  text_color: "0x${c_muted}"
+                  on_click:
+                    - script.execute: { id: focus_extreme, want_max: false }
+              - label: { id: v_mrem, x: 4, y: 9, width: 142, text: "rem. -- kWh", text_align: CENTER, text_font: inter_18, text_color: "0x${c_blue}", hidden: true }
+              - label: { id: v_mtot, x: 4, y: 39, width: 142, text: "tot. -- kWh", text_align: CENTER, text_font: inter_18, text_color: "0x${c_blue}", hidden: true }
+              - label: { id: v_mdis, x: 150, y: 9, width: 160, text: "max dis -- kW", text_align: CENTER, text_font: inter_18, text_color: "0x${c_blue}", hidden: true }
+              - label: { id: v_mchg, x: 150, y: 39, width: 160, text: "max chg -- kW", text_align: CENTER, text_font: inter_18, text_color: "0x${c_green}", hidden: true }
+              - obj: { id: sep_a, styles: st_rule, x: 150, y: 12, width: 1, height: 50 }
+              - label: { id: v_delta, x: 150, y: 18, width: 160, text: "Δ -- mV", text_align: CENTER, text_font: inter_d32, text_color: "0x${c_muted}" }
+              - obj: { id: sep_b, styles: st_rule, x: 310, y: 12, width: 1, height: 50 }
+              - label: { id: v_temp, x: 310, y: 14, width: 150, text: "--.-°C", text_align: CENTER, text_font: montserrat_40, text_color: "0x${c_blue}" }
+              - label: { id: v_offline, x: 10, y: 8, width: 440, text: "", text_align: CENTER, text_font: inter_16, text_color: "0x${c_red}", hidden: true }
+        # ---- event notification ----
+        - obj:
+            id: warn_bar
+            styles: st_card
+            scrollable: false
+            x: 10
+            y: 418
+            width: 460
+            height: 34
+            radius: 9
+            bg_color: 0x241700
+            border_color: "0x${c_amber}"
+            hidden: true
+            on_click:
+              - lvgl.page.show: pg_events
+            widgets:
+              - label: { id: v_warn, x: 8, y: 7, width: 444, text: "", text_align: CENTER, text_font: inter_16, text_color: "0x${c_amber}" }
+
+    # =========================================================================
+    # BATTERIES - the reference's multi-pack dashboard. Skipped with one pack.
+    # =========================================================================
+    - id: pg_batt
+      styles: st_page
+      skip: true
+      on_load:
+        - script.execute: { id: page_loaded, page: 1 }
+      on_swipe_left: *swipe_next
+      on_swipe_right: *swipe_prev
+      widgets:
+        - obj:
+            styles: st_title
+            scrollable: false
+            x: 10
+            y: 8
+            width: 460
+            height: 54
+            widgets:
+              - label: { x: 0, y: 8, width: 460, text: "BATTERIES", text_align: CENTER, text_font: inter_d32 }
+              - label: { id: v_batt_badge, x: 340, y: 18, width: 110, text: "", text_align: RIGHT, text_font: inter_14 }
+        - obj:
+            id: bc_1
+            styles: st_card
+            scrollable: false
+            x: 10
+            y: 68
+            width: 460
+            height: 116
+            radius: 14
+            border_color: "0x${c_green}"
+            on_click:
+              - script.execute: { id: select_pack, pack: 0 }
+              - lvgl.page.show: pg_cells
+            widgets:
+              - label: { x: 15, y: 9, text: "BATTERY 1", text_font: montserrat_18, text_color: "0x${c_green}" }
+              - label: { id: bt_1, x: 15, y: 38, width: 436, text: "WAITING FOR DATA", text_font: inter_14, text_line_space: 6, text_color: "0x${c_muted}" }
+        - obj:
+            id: bc_2
+            styles: st_card
+            scrollable: false
+            x: 10
+            y: 192
+            width: 460
+            height: 116
+            radius: 14
+            border_color: "0x${c_blue}"
+            on_click:
+              - script.execute: { id: select_pack, pack: 1 }
+              - lvgl.page.show: pg_cells
+            widgets:
+              - label: { x: 15, y: 9, text: "BATTERY 2", text_font: montserrat_18, text_color: "0x${c_blue}" }
+              - label: { id: bt_2, x: 15, y: 38, width: 436, text: "WAITING FOR DATA", text_font: inter_14, text_line_space: 6, text_color: "0x${c_muted}" }
+        - obj:
+            id: bc_3
+            styles: st_card
+            scrollable: false
+            x: 10
+            y: 316
+            width: 460
+            height: 116
+            radius: 14
+            border_color: "0x${c_blue}"
+            on_click:
+              - script.execute: { id: select_pack, pack: 2 }
+              - lvgl.page.show: pg_cells
+            widgets:
+              - label: { x: 15, y: 9, text: "BATTERY 3", text_font: montserrat_18, text_color: "0x${c_blue}" }
+              - label: { id: bt_3, x: 15, y: 38, width: 436, text: "WAITING FOR DATA", text_font: inter_14, text_line_space: 6, text_color: "0x${c_muted}" }
+        - label: { x: 0, y: 440, width: 480, text: "TAP A BATTERY FOR ITS CELLS   |   SWIPE FOR MORE", text_align: CENTER, text_font: montserrat_12, text_color: "0x${c_muted}" }
+
+    # =========================================================================
+    # CELL MONITOR - uBuildCells()
+    # =========================================================================
+    - id: pg_cells
+      styles: st_page
+      on_load:
+        - script.execute: { id: page_loaded, page: 2 }
+      on_swipe_left: *swipe_next
+      on_swipe_right: *swipe_prev
+      widgets:
+        - obj:
+            styles: st_title
+            scrollable: false
+            x: 10
+            y: 8
+            width: 460
+            height: 54
+            on_click:
+              - script.execute: next_pack
+            widgets:
+              - label: { x: 0, y: 8, width: 460, text: "CELL MONITOR", text_align: CENTER, text_font: inter_d32 }
+              - label: { id: v_cells_badge, x: 340, y: 18, width: 110, text: "", text_align: RIGHT, text_font: inter_14 }
+        - obj:
+            styles: st_card
+            scrollable: false
+            x: 10
+            y: 72
+            width: 108
+            height: 74
+            radius: 10
+            widgets:
+              - label: { x: 10, y: 5, text: "MIN", text_font: inter_14 }
+              - label: { id: c_min_v, x: 0, y: 24, width: 108, text: "--\nCELL --", text_align: CENTER, text_font: inter_18, text_color: "0x${c_blue}" }
+        - obj:
+            styles: st_card
+            scrollable: false
+            x: 127
+            y: 72
+            width: 108
+            height: 74
+            radius: 10
+            widgets:
+              - label: { x: 10, y: 5, text: "MAX", text_font: inter_14 }
+              - label: { id: c_max_v, x: 0, y: 24, width: 108, text: "--\nCELL --", text_align: CENTER, text_font: inter_18, text_color: "0x${c_green}" }
+        - obj:
+            styles: st_card
+            scrollable: false
+            x: 244
+            y: 72
+            width: 108
+            height: 74
+            radius: 10
+            widgets:
+              - label: { x: 10, y: 5, text: "CELL DELTA", text_font: inter_14 }
+              - label: { id: c_dlt_v, x: 0, y: 29, width: 108, text: "Δ -- mV", text_align: CENTER, text_font: inter_18, text_color: "0x${c_green}" }
+        - obj:
+            styles: st_card
+            scrollable: false
+            x: 361
+            y: 72
+            width: 109
+            height: 74
+            radius: 10
+            widgets:
+              - label: { x: 10, y: 5, text: "TEMP", text_font: inter_14 }
+              - label: { id: c_tmp_v, x: 0, y: 22, width: 109, text: "--\n--", text_align: CENTER, text_font: inter_16, text_line_space: 2, text_color: "0x${c_blue}" }
+        - label: { id: v_min_tag, x: 0, y: 151, text: "", text_font: inter_14, text_color: "0x${c_blue}", hidden: true }
+        - label: { id: v_max_tag, x: 0, y: 151, text: "", text_font: inter_14, text_color: "0x${c_green}", hidden: true }
+        # The chart: one widget whose draw event paints every bar from cell_mv. Bars stand
+        # on y = 420 and run 75 px (lowest cell) to 175 px (highest) tall, as in the
+        # reference; the scale is relative, so the MIN / MAX cards carry the figures.
+        - obj:
+            id: cell_plot
+            x: 0
+            y: 170
+            width: 480
+            height: 250
+            bg_opa: TRANSP
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            on_draw_main_end:
+              - lambda: |-
+                  const int b = id(sel_pack), n = id(cell_n)[b];
+                  const int ilo = id(c_ilo), ihi = id(c_ihi);
+                  if (n <= 0 || ilo < 0 || ihi < 0) return;
+                  lv_layer_t* layer = lv_event_get_layer(event);
+                  lv_area_t a;
+                  lv_obj_get_coords(id(cell_plot), &a);
+                  const int base = b * 192;
+                  const int lo = id(cell_mv)[base + ilo];
+                  int span = id(cell_mv)[base + ihi] - lo;
+                  if (span < 20) span = 20;
+                  int slot = 480 / n; if (slot < 1) slot = 1;
+                  int bw = slot >= 2 ? slot - 1 : 1; if (bw > 18) bw = 18;
+                  const int x0 = (480 - slot * n) / 2 + (slot - bw) / 2;
+                  const int fault = id(c_fault), foc = id(cell_focus);
+                  lv_draw_rect_dsc_t d;
+                  lv_draw_rect_dsc_init(&d);
+                  d.bg_opa = LV_OPA_COVER;
+                  d.border_width = 0;
+                  d.radius = bw >= 4 ? 2 : 0;
+                  auto bar = [&](int k, int grow) {
+                    const int v = id(cell_mv)[base + k];
+                    if (v < 1000) return;
+                    int ht = 75 + (v - lo) * 100 / span;
+                    ht = ht < 65 ? 65 : (ht > 175 ? 175 : ht);
+                    uint32_t c = 0x${c_bar};
+                    if (k == ilo)      c = (fault & 1) ? 0x${c_red} : 0x${c_blue};
+                    else if (k == ihi) c = (fault & 2) ? 0x${c_red} : 0x${c_green};
+                    const int x = a.x1 + x0 + k * slot;
+                    lv_area_t r = {x - grow, a.y2 - ht + 1, x + bw - 1 + grow, a.y2};
+                    d.bg_color = lv_color_hex(c);
+                    lv_draw_rect(layer, &d, &r);
+                    if (id(cell_bal)[base + k]) {        // balancing: amber cap
+                      lv_draw_rect_dsc_t cap = d;
+                      cap.bg_color = lv_color_hex(0x${c_soft_amber});
+                      cap.border_width = 0;
+                      lv_area_t rc = {r.x1, r.y1, r.x2, r.y1 + 3};
+                      lv_draw_rect(layer, &cap, &rc);
+                    }
+                  };
+                  for (int k = 0; k < n; k++) if (k != foc) bar(k, 0);
+                  // The selected cell last, on top: widened and outlined in white.
+                  if (foc >= 0 && foc < n) {
+                    d.border_width = 2;
+                    d.border_color = lv_color_hex(0xFFFFFF);
+                    d.border_opa = LV_OPA_COVER;
+                    bar(foc, 2);
+                  }
+            # Tap or drag across the bars to read single cells.
+            on_press: &cell_pick
+              - lambda: |-
+                  const int b = id(sel_pack), n = id(cell_n)[b];
+                  if (n <= 0) return;
+                  int slot = 480 / n; if (slot < 1) slot = 1;
+                  int k = (point.x - (480 - slot * n) / 2) / slot;
+                  k = k < 0 ? 0 : (k >= n ? n - 1 : k);
+                  if (k == id(cell_focus) && id(cell_focus_kind) == 0) return;
+                  id(cell_focus) = k;
+                  id(cell_focus_kind) = 0;
+                  id(render_cells).execute();
+            on_pressing: *cell_pick
+        - label: { id: v_focus, x: 0, y: 432, width: 480, text: "", text_align: CENTER, text_font: inter_14, hidden: true }
+
+    # =========================================================================
+    # EVENTS - uBuildEvents()
+    # =========================================================================
+    - id: pg_events
+      styles: st_page
+      on_load:
+        - script.execute: { id: page_loaded, page: 3 }
+      on_swipe_left: *swipe_next
+      on_swipe_right: *swipe_prev
+      widgets:
+        - obj:
+            styles: st_title
+            scrollable: false
+            x: 10
+            y: 8
+            width: 460
+            height: 54
+            widgets:
+              - label: { x: 0, y: 8, width: 460, text: "EVENTS", text_align: CENTER, text_font: inter_d32 }
+              - label: { id: v_ev_badge, x: 340, y: 18, width: 110, text: "", text_align: RIGHT, text_font: inter_14, text_color: "0x${c_amber}" }
+        - label: { id: v_ev_count, x: 20, y: 70, text: "WAITING FOR THE EMULATOR", text_font: montserrat_14, text_color: "0x${c_muted}" }
+        # A card list: the cards are built at runtime by render_events. The list owns the
+        # scrolling; ESP-NOW is read-only, so there are no command buttons below it.
+        # (The hidden spacer is there because ESPHome only builds LVGL's flex layout
+        # into the firmware for a layout that has declared children.)
+        - obj:
+            id: ev_list
+            styles: st_card
+            x: 10
+            y: 96
+            width: 460
+            height: 345
+            radius: 10
+            pad_all: 8
+            scroll_dir: VER
+            scrollbar_mode: AUTO
+            layout:
+              type: FLEX
+              flex_flow: COLUMN
+              pad_row: 8
+            widgets:
+              - obj: { width: 0, height: 0, hidden: true }
+        - label: { id: v_ev_empty, x: 0, y: 238, width: 480, text: "NO EVENTS", text_align: CENTER, text_font: montserrat_20, text_color: "0x${c_green}", hidden: true }
+        - label: { id: v_ev_more, x: 428, y: 443, text: "MORE", text_font: montserrat_12, text_color: "0x${c_green}", hidden: true }
+
+    # =========================================================================
+    # BATTERY INFO - uBuildInfo(), for the selected pack
+    # =========================================================================
+    - id: pg_info
+      styles: st_page
+      on_load:
+        - script.execute: { id: page_loaded, page: 4 }
+      on_swipe_left: *swipe_next
+      on_swipe_right: *swipe_prev
+      widgets:
+        - obj:
+            styles: st_title
+            scrollable: false
+            x: 10
+            y: 8
+            width: 460
+            height: 54
+            on_click:
+              - script.execute: next_pack
+            widgets:
+              - label: { x: 0, y: 8, width: 460, text: "BATTERY INFO", text_align: CENTER, text_font: inter_d32 }
+              - label: { id: v_info_badge, x: 340, y: 18, width: 110, text: "", text_align: RIGHT, text_font: inter_14 }
+        - obj:
+            styles: st_card
+            scrollable: false
+            x: 10
+            y: 70
+            width: 460
+            height: 58
+            widgets:
+              - label: { x: 18, y: 19, text: "CONTACTORS", text_font: montserrat_16 }
+              - label: { id: v_cont, x: 180, y: 7, width: 255, text: "--", text_align: CENTER, text_font: inter_d32, text_color: "0x${c_muted}" }
+        - obj:
+            styles: st_card
+            scrollable: false
+            x: 10
+            y: 134
+            width: 460
+            height: 44
+            radius: 9
+            widgets:
+              - label: { id: v_bms_row, x: 10, y: 11, width: 440, text: "BMS STATUS  --", recolor: true, text_align: CENTER, text_font: montserrat_18 }
+        - obj:
+            styles: st_card
+            scrollable: false
+            x: 10
+            y: 184
+            width: 460
+            height: 44
+            radius: 9
+            widgets:
+              - label: { id: v_links, x: 10, y: 11, width: 440, text: "BATTERY CAN  --   |   INVERTER CAN  --", recolor: true, text_align: CENTER, text_font: montserrat_18 }
+        - obj:
+            styles: st_card
+            scrollable: false
+            x: 10
+            y: 234
+            width: 460
+            height: 44
+            radius: 9
+            widgets:
+              - label: { id: v_power_row, x: 10, y: 11, width: 440, text: "DC BUS  --   |   E-STOP  --", recolor: true, text_align: CENTER, text_font: montserrat_18 }
+        - obj:
+            styles: st_card
+            scrollable: false
+            x: 10
+            y: 284
+            width: 460
+            height: 85
+            radius: 10
+            widgets:
+              - label: { id: v_health, x: 10, y: 6, width: 440, text: "SOH --        REAL SOC --", text_align: CENTER, text_font: montserrat_16 }
+              - label: { id: v_chg_lim, x: 12, y: 31, width: 436, text: "CHARGE LIMIT       -- kW  |  -- A", text_align: CENTER, text_font: montserrat_18, text_color: "0x${c_green}" }
+              - label: { id: v_dis_lim, x: 12, y: 57, width: 436, text: "DISCHARGE LIMIT    -- kW  |  -- A", text_align: CENTER, text_font: montserrat_18, text_color: "0x${c_blue}" }
+        - obj:
+            styles: st_card
+            scrollable: false
+            x: 10
+            y: 375
+            width: 460
+            height: 68
+            radius: 10
+            widgets:
+              - label: { id: v_bal, x: 16, y: 9, width: 215, text: "BALANCING  --", text_font: montserrat_16, text_color: "0x${c_blue}" }
+              - label: { id: v_canerr, x: 235, y: 9, width: 209, text: "CAN ERRORS  --", text_align: RIGHT, text_font: montserrat_16, text_color: "0x${c_blue}" }
+              - label: { id: v_iso, x: 12, y: 38, width: 436, text: "ISOLATION  --", text_align: CENTER, text_font: montserrat_18, text_color: "0x${c_blue}" }
+
+    # =========================================================================
+    # ENERGY - the capacity screen of the reference's 320x170 sibling, at 480x480
+    # =========================================================================
+    - id: pg_energy
+      styles: st_page
+      on_load:
+        - script.execute: { id: page_loaded, page: 5 }
+      on_swipe_left: *swipe_next
+      on_swipe_right: *swipe_prev
+      widgets:
+        - obj:
+            styles: st_title
+            scrollable: false
+            x: 10
+            y: 8
+            width: 460
+            height: 54
+            widgets:
+              - label: { x: 0, y: 8, width: 460, text: "ENERGY", text_align: CENTER, text_font: inter_d32 }
+        - obj:
+            styles: st_card
+            scrollable: false
+            x: 10
+            y: 70
+            width: 225
+            height: 146
+            widgets:
+              - label: { x: 10, y: 5, text: "REMAINING", text_font: inter_14 }
+              - label: { id: v_rem, x: 0, y: 48, width: 225, text: "-- kWh", text_align: CENTER, text_font: inter_d32, text_color: "0x${c_blue}" }
+              - label: { id: v_soh_e, x: 12, y: 112, width: 200, text: "SOH --", text_font: inter_16, text_color: "0x${c_green}" }
+        - obj:
+            styles: st_card
+            scrollable: false
+            x: 245
+            y: 70
+            width: 225
+            height: 146
+            widgets:
+              - label: { x: 10, y: 5, text: "TOTAL", text_font: inter_14 }
+              - label: { id: v_cap, x: 0, y: 48, width: 225, text: "-- kWh", text_align: CENTER, text_font: inter_d32, text_color: "0x${c_blue}" }
+              - label: { id: v_rep, x: 12, y: 114, width: 205, text: "REPORTED  --", long_mode: DOT, text_font: inter_14, text_color: "0x${c_muted}" }
+        - obj:
+            styles: st_card
+            scrollable: false
+            x: 10
+            y: 224
+            width: 225
+            height: 100
+            widgets:
+              - label: { x: 10, y: 5, text: "CHARGED", text_font: inter_14 }
+              - label: { id: v_tchg, x: 0, y: 40, width: 225, text: "-- kWh", text_align: CENTER, text_font: inter_d32, text_color: "0x${c_green}" }
+        - obj:
+            styles: st_card
+            scrollable: false
+            x: 245
+            y: 224
+            width: 225
+            height: 100
+            widgets:
+              - label: { x: 10, y: 5, text: "DISCHARGED", text_font: inter_14 }
+              - label: { id: v_tdis, x: 0, y: 40, width: 225, text: "-- kWh", text_align: CENTER, text_font: inter_d32, text_color: "0x${c_blue}" }
+        - obj:
+            styles: st_card
+            scrollable: false
+            x: 10
+            y: 332
+            width: 460
+            height: 110
+            widgets:
+              - label: { x: 10, y: 5, text: "LIMITS", text_font: inter_14 }
+              - label: { id: v_limit, x: 0, y: 28, width: 458, text: "LIMITED BY  --", text_align: CENTER, text_font: montserrat_18, text_color: "0x${c_muted}" }
+              - label: { id: v_ovr, x: 0, y: 58, width: 458, text: "USER OVERRIDE  --", text_align: CENTER, text_font: montserrat_14, text_color: "0x${c_muted}" }
+              - label: { id: v_rcur, x: 0, y: 81, width: 458, text: "CURRENT TO INVERTER  --", text_align: CENTER, text_font: montserrat_14, text_color: "0x${c_muted}" }
+
+    # =========================================================================
+    # DISPLAY MENU - uBuildControl(): an evenly spaced 2 x 4 grid
+    # =========================================================================
+    - id: pg_menu
+      styles: st_page
+      on_load:
+        - script.execute: { id: page_loaded, page: 6 }
+      on_swipe_left: *swipe_next
+      on_swipe_right: *swipe_prev
+      widgets:
+        - obj:
+            styles: st_title
+            scrollable: false
+            x: 10
+            y: 8
+            width: 460
+            height: 54
+            widgets:
+              - label: { x: 0, y: 8, width: 460, text: "DISPLAY MENU", text_align: CENTER, text_font: inter_d32 }
+        - button:
+            x: 10
+            y: 80
+            width: 220
+            height: 54
+            on_click: [ lvgl.page.show: pg_main ]
+            widgets: [ label: { text: "MAIN SCREEN", align: CENTER } ]
+        - button:
+            x: 240
+            y: 80
+            width: 220
+            height: 54
+            on_click: [ lvgl.page.show: pg_cells ]
+            widgets: [ label: { text: "CELL MONITOR", align: CENTER } ]
+        - button:
+            x: 10
+            y: 164
+            width: 220
+            height: 54
+            on_click: [ lvgl.page.show: pg_info ]
+            widgets: [ label: { text: "BATTERY INFO", align: CENTER } ]
+        - button:
+            x: 240
+            y: 164
+            width: 220
+            height: 54
+            on_click: [ lvgl.page.show: pg_events ]
+            widgets: [ label: { text: "EVENTS", align: CENTER } ]
+        - button:
+            x: 10
+            y: 248
+            width: 220
+            height: 54
+            on_click: [ lvgl.page.show: pg_energy ]
+            widgets: [ label: { text: "ENERGY", align: CENTER } ]
+        - button:
+            x: 240
+            y: 248
+            width: 220
+            height: 54
+            on_click: [ lvgl.page.show: pg_system ]
+            widgets: [ label: { text: "SYSTEM", align: CENTER } ]
+        - button:
+            x: 10
+            y: 332
+            width: 220
+            height: 54
+            on_click: [ script.execute: next_emulator ]
+            widgets: [ label: { text: "NEXT EMULATOR", align: CENTER } ]
+        - button:
+            x: 240
+            y: 332
+            width: 220
+            height: 54
+            border_color: "0x${c_green}"
+            on_click: [ script.execute: screen_off ]
+            widgets: [ label: { text: "SCREEN OFF", align: CENTER, text_color: "0x${c_green}" } ]
+        - label: { id: v_toast, x: 20, y: 425, width: 440, text: "", text_align: CENTER, text_font: inter_14, text_color: "0x${c_green}", hidden: true }
+
+    # =========================================================================
+    # SYSTEM - uBuildSystem(), the connection-setup button becomes the emulator selector
+    # =========================================================================
+    - id: pg_system
+      styles: st_page
+      on_load:
+        - script.execute: { id: page_loaded, page: 7 }
+      on_swipe_left: *swipe_next
+      on_swipe_right: *swipe_prev
+      widgets:
+        - obj:
+            styles: st_title
+            scrollable: false
+            x: 10
+            y: 8
+            width: 460
+            height: 54
+            widgets:
+              - label: { x: 0, y: 8, width: 460, text: "SYSTEM", text_align: CENTER, text_font: inter_d32 }
+        # Two cards in the same place; the checked selector button picks which one
+        # shows (show_sys_view). Emulator diagnostics scroll vertically in theirs.
+        - obj:
+            id: sys_emu
+            styles: st_card
+            x: 10
+            y: 72
+            width: 460
+            height: 298
+            pad_left: 16
+            pad_right: 16
+            pad_top: 8
+            pad_bottom: 8
+            scroll_dir: VER
+            scrollbar_mode: AUTO
+            layout:
+              type: GRID
+              grid_columns: [FR(40), FR(60)]
+              grid_rows: [22, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 34, 28, 28, 28, 28, 28]
+            widgets:
+              - label: { text: "EMULATOR", text_font: montserrat_12, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_column_span: 2, grid_cell_row_pos: 0, grid_cell_y_align: END }
+              - label: { text: "ESPNow", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 1, grid_cell_y_align: CENTER }
+              - label: { id: v_link, text: "OFFLINE", text_font: montserrat_16, text_color: "0x${c_red}", grid_cell_column_pos: 1, grid_cell_row_pos: 1, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "FRAMES", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 2, grid_cell_y_align: CENTER }
+              - label: { id: v_frames, text: "0", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 2, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "FIRMWARE", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 3, grid_cell_y_align: CENTER }
+              - label: { id: v_fw, text: "--", text_font: montserrat_16, long_mode: DOT, width: 100%, text_align: RIGHT, grid_cell_column_pos: 1, grid_cell_row_pos: 3, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "HOSTNAME", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 4, grid_cell_y_align: CENTER }
+              - label: { id: v_host, text: "--", text_font: montserrat_16, long_mode: DOT, width: 100%, text_align: RIGHT, grid_cell_column_pos: 1, grid_cell_row_pos: 4, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "UPTIME", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 5, grid_cell_y_align: CENTER }
+              - label: { id: v_uptime, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 5, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "SYSTEM", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 6, grid_cell_y_align: CENTER }
+              - label: { id: v_sysst, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 6, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "STATUS", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 7, grid_cell_y_align: CENTER }
+              - label: { id: v_emust, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 7, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "PAUSE", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 8, grid_cell_y_align: CENTER }
+              - label: { id: v_pause, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 8, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "EVENT LEVEL", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 9, grid_cell_y_align: CENTER }
+              - label: { id: v_evlvl, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 9, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "CPU TEMP", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 10, grid_cell_y_align: CENTER }
+              - label: { id: v_cpu, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 10, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "FREE HEAP", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 11, grid_cell_y_align: CENTER }
+              - label: { id: v_heap, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 11, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "LED MODE", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 12, grid_cell_y_align: CENTER }
+              - label: { id: v_led, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 12, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "NETWORK", text_font: montserrat_12, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_column_span: 2, grid_cell_row_pos: 13, grid_cell_y_align: END }
+              - label: { text: "IP", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 14, grid_cell_y_align: CENTER }
+              - label: { id: v_ip, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 14, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "MAC", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 15, grid_cell_y_align: CENTER }
+              - label: { id: v_mac, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 15, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "SSID", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 16, grid_cell_y_align: CENTER }
+              - label: { id: v_ssid, text: "--", text_font: montserrat_16, long_mode: DOT, width: 100%, text_align: RIGHT, grid_cell_column_pos: 1, grid_cell_row_pos: 16, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "SIGNAL", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 17, grid_cell_y_align: CENTER }
+              - label: { id: v_rssi, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 17, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "AP MODE", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 18, grid_cell_y_align: CENTER }
+              - label: { id: v_ap, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 18, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+        # This display / ESPHome itself. Everything fits, so no scrolling here - which
+        # also keeps a drag on the slider from ever becoming a scroll.
+        - obj:
+            id: sys_disp
+            styles: st_card
+            scrollable: false
+            hidden: true
+            x: 10
+            y: 72
+            width: 460
+            height: 298
+            pad_left: 16
+            pad_right: 22
+            pad_top: 8
+            pad_bottom: 8
+            layout:
+              type: GRID
+              pad_row: 0
+              grid_columns: [FR(40), FR(60)]
+              grid_rows: [22, 44, 35, 35, 35, 35, 35, 35]
+            widgets:
+              - label: { text: "THIS DISPLAY", text_font: montserrat_12, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_column_span: 2, grid_cell_row_pos: 0, grid_cell_y_align: END }
+              - label: { id: v_bl, text: "BACKLIGHT", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 1, grid_cell_y_align: CENTER }
+              # Bound to the bl_level number below, which stores the setting and
+              # restores it at boot. 90 % is the floor.
+              - slider:
+                  id: bl_slider
+                  min_value: 30
+                  max_value: 100
+                  value: 100
+                  height: 12
+                  gesture_bubble: false     # dragging it must not flip the page
+                  grid_cell_column_pos: 1
+                  grid_cell_row_pos: 1
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: CENTER
+                  bg_color: "0x${c_arc_bg}"
+                  bg_opa: COVER
+                  radius: 6
+                  indicator:
+                    bg_color: "0x${c_green}"
+                    radius: 6
+                  knob:
+                    bg_color: 0xFFFFFF
+                    border_width: 0
+                    shadow_width: 0
+                    pad_all: 6
+              - label: { text: "MAC ADDRESS", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 2, grid_cell_y_align: CENTER }
+              - label: { id: v_dmac, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 2, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "SSID", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 3, grid_cell_y_align: CENTER }
+              - label: { id: v_dssid, text: "--", text_font: montserrat_16, long_mode: DOT, width: 100%, text_align: RIGHT, grid_cell_column_pos: 1, grid_cell_row_pos: 3, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "WIFI SIGNAL", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 4, grid_cell_y_align: CENTER }
+              - label: { id: v_drssi, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 4, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "IP ADDRESS", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 5, grid_cell_y_align: CENTER }
+              - label: { id: v_dip, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 5, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "UPTIME", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 6, grid_cell_y_align: CENTER }
+              - label: { id: v_dup, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 6, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "FREE HEAP", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 7, grid_cell_y_align: CENTER }
+              - label: { id: v_dheap, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 7, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+        # Selector, where the reference has its CONNECTION SETUP button. one_checked
+        # makes the matrix a radio group, and the checked button names the card on
+        # show: an emulator (tapping one also starts watching it) or this display.
+        - buttonmatrix:
+            id: emu_sel
+            x: 10
+            y: 380
+            width: 460
+            height: 62
+            one_checked: true
+            pad_all: 0
+            pad_column: 8
+            border_width: 0
+            bg_opa: TRANSP
+            items:
+              text_font: inter_16
+              text_color: "0x${c_blue}"
+              bg_color: "0x${c_card}"
+              bg_opa: COVER
+              border_color: "0x${c_blue}"
+              border_width: 1
+              radius: 10
+              shadow_width: 0
+              pressed:
+                bg_color: 0x0E2A40
+              checked:
+                text_color: "0x${c_green}"
+                border_color: "0x${c_green}"
+                bg_color: 0x0D2410
+            # A buttonmatrix has no on_value - it is a compound widget, not a
+            # value-carrying one. Its individual buttons do carry the normal triggers
+            # though, and ESPHome fires each one only for its own button, so on_click
+            # per button is the way in.
+            rows:
+              - buttons:
+                  - id: emu_b1
+                    text: "${emulator_1_name}"
+                    control: [ checkable: true ]
+                    on_click:
+                      - script.execute:
+                          id: select_emulator
+                          name: "${emulator_1_name}"
+                  - id: emu_b2
+                    text: "${emulator_2_name}"
+                    control: [ checkable: true ]
+                    on_click:
+                      - script.execute:
+                          id: select_emulator
+                          name: "${emulator_2_name}"
+                  - id: emu_b3
+                    text: "${emulator_3_name}"
+                    control: [ checkable: true ]
+                    on_click:
+                      - script.execute:
+                          id: select_emulator
+                          name: "${emulator_3_name}"
+                  # Shows this display's card. The watched emulator does not change.
+                  - id: disp_b
+                    text: "Display"
+                    control: [ checkable: true ]
+                    on_click:
+                      - script.execute:
+                          id: show_sys_view
+                          view: 1
