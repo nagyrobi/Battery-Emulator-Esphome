@@ -1,0 +1,68 @@
+# =============================================================================
+# Hardware pak TEMPLATE - copy this to pak/zz_hw_<board>.yaml, fill it in, and select it
+# in the main config:
+#   packages:
+#     display_hw: !include pak/zz_hw_<board>.yaml
+#
+# The main config knows nothing about the board. This file is the whole contract:
+#
+#   substitutions
+#     disp_w, disp_h  Size of the panel in pixels, as the display driver reports it (a
+#                     portrait panel such as 320x480 is written 320 / 480 here).
+#     disp_rot        0, 90, 180 or 270: the LVGL rotation. The user interface wants a
+#                     landscape (or square) screen, so a portrait panel gets 90 or 270.
+#                     Must match `lvgl: rotation` below (leave that out for 0).
+#   esp32, psram      the chip, flash size and the memory setup
+#   buses             spi / i2c / whatever the panel and the touch controller sit on
+#   output            an output with id `gpio_backlight_pwm`: the backlight pin. The main
+#                     config builds the `display_backlight` light on it.
+#   display           one entry with id `my_display`
+#   touchscreen       one entry with id `my_touch`. Do not put `on_release` here: the main
+#                     config adds it (id: !extend my_touch). Poll it every 16-30 ms, LVGL
+#                     recognises swipes from successive samples.
+#   lvgl              `buffer_size`, and `rotation` when disp_rot is not 0
+#
+# What the pak must NOT contain: wifi, api, ota, logger, fonts, lvgl pages or scripts.
+# Those are the same for every board.
+# =============================================================================
+
+substitutions:
+  disp_w: 480
+  disp_h: 320
+  disp_rot: 0
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+
+psram:
+  speed: 80MHz
+  mode: octal
+
+# spi:
+#   ...
+# i2c:
+#   id: touchscreen_bus
+#   sda: ...
+#   scl: ...
+
+output:
+  - platform: ledc
+    id: gpio_backlight_pwm
+    pin: GPIO1                   # <- the backlight pin
+
+# display:
+#   - platform: ...             # or mipi_spi / mipi_rgb with a `model:`
+#     id: my_display
+#     ...
+
+# touchscreen:
+#   - platform: ...
+#     id: my_touch
+#     display: my_display
+#     update_interval: 30ms
+
+lvgl:
+  buffer_size: 25%               # 100% when the panel has PSRAM to spare and no slow bus
+  # rotation: 90                 # for a portrait panel, together with disp_rot: 90

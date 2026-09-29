@@ -1,4 +1,21 @@
+# =============================================================================
+# Hardware pak: Guition JC3248W535 - 3.5" 320x480 (portrait panel), AXS15231B QSPI
+# display and AXS15231 touch. Used as a 480x320 landscape screen.
+#
+# Included from the main config:
+#   packages:
+#     display_hw: !include pak/zz_hw_guition_jc3248w535.yaml
+# NOT YET RUN ON THE BOARD: the panel is a portrait one, so `lvgl: rotation` (90 or 270,
+# whichever puts the top of the UI where you want it) makes it landscape. Flip it if the
+# picture is upside down; the touch follows automatically.
+#
+# What a pak provides: see zz_hw_template.yaml
+# =============================================================================
+
 substitutions:
+  disp_w: 320              # the panel as the driver reports it ...
+  disp_h: 480
+  disp_rot: 90             # ... and the rotation that makes the UI 480x320 landscape
   device_description: "Guition JC3248w535"
 
 esp32:
@@ -11,40 +28,11 @@ psram:
   speed: 80MHz
   mode: octal
 
-wifi:
-  reboot_timeout: 30min
-  enable_btm: true
-  enable_rrm: true
-
 spi:
   id: display_qspi
   type: quad
   clk_pin: 47
-  data_pins: 
-    - 21
-    - 48substitutions:
-  device_description: "Guition JC3248w535"
-
-esp32:
-  board: esp32-s3-devkitc-1
-  flash_size: 16MB
-  framework:
-    type: esp-idf
-
-psram:
-  speed: 80MHz
-  mode: octal
-
-wifi:
-  reboot_timeout: 30min
-  enable_btm: true
-  enable_rrm: true
-
-spi:
-  id: display_qspi
-  type: quad
-  clk_pin: 47
-  data_pins: 
+  data_pins:
     - 21
     - 48
     - 40
@@ -60,65 +48,6 @@ output:
     id: gpio_backlight_pwm
     pin: 1
 
-light:
-  - id: display_backlight
-    name: Backlight
-    platform: monochromatic
-    output: gpio_backlight_pwm
-    restore_mode: ALWAYS_ON
-    default_transition_length: 500ms
-
-display:
-  - platform: mipi_spi
-    id: my_display
-    model: JC3248W535
-
-touchscreen:substitutions:
-  device_description: "Guition JC3248w535"
-
-esp32:
-  board: esp32-s3-devkitc-1
-  flash_size: 16MB
-  framework:
-    type: esp-idf
-
-psram:
-  speed: 80MHz
-  mode: octal
-
-wifi:
-  reboot_timeout: 30min
-  enable_btm: true
-  enable_rrm: true
-
-spi:
-  id: display_qspi
-  type: quad
-  clk_pin: 47
-  data_pins: 
-    - 21
-    - 48
-    - 40
-    - 39
-
-i2c:
-  id: touchscreen_bus
-  sda: 4
-  scl: 8
-
-output:
-  - platform: ledc
-    id: gpio_backlight_pwm
-    pin: 1
-
-light:
-  - id: display_backlight
-    name: Backlight
-    platform: monochromatic
-    output: gpio_backlight_pwm
-    restore_mode: ALWAYS_ON
-    default_transition_length: 500ms
-
 display:
   - platform: mipi_spi
     id: my_display
@@ -128,153 +57,16 @@ touchscreen:
   - platform: axs15231
     id: my_touch
     display: my_display
-    update_interval: 150ms
-    # interrupt_pin: 
-      # number: 3
-      # ignore_strapping_warning: true
+    update_interval: 30ms  # LVGL detects swipes from successive samples: poll fast
+    # interrupt_pin:
+    #   number: 3
+    #   ignore_strapping_warning: true
     # calibration:
-      # x_min: 0
-      # x_max: 479
-      # y_min: 0
-      # y_max: 319
+    #   x_min: 0
+    #   x_max: 479
+    #   y_min: 0
+    #   y_max: 319
 
-uart:
-  - id: evse_uart
-    tx_pin: 43
-    rx_pin: 44
-
-
-  - platform: axs15231
-    id: my_touch
-    display: my_display
-    update_interval: 150ms
-    # interrupt_pin: 
-      # number: 3
-      # ignore_strapping_warning: true
-    # calibration:
-      # x_min: 0
-      # x_max: 479
-      # y_min: 0
-      # y_max: 319
-
-uart:
-  - id: evse_uart
-    tx_pin: 43
-    rx_pin: 44
-
-
-    - 40
-    - 39
-
-i2c:
-  id: touchscreen_bus
-  sda: 4
-  scl: 8
-
-output:
-  - platform: ledc
-    id: gpio_backlight_pwm
-    pin: 1
-
-light:
-  - id: display_backlight
-    name: Backlight
-    platform: monochromatic
-    output: gpio_backlight_pwm
-    restore_mode: ALWAYS_ON
-    default_transition_length: 500ms
-
-display:
-  - platform: mipi_spi
-    id: my_display
-    model: JC3248W535
-
-touchscreen:
-  - platform: axs15231
-    id: my_touch
-    display: my_display
-    update_interval: 150ms
-    # interrupt_pin: 
-      # number: 3substitutions:
-  device_description: "Guition JC3248w535"
-
-esp32:
-  board: esp32-s3-devkitc-1
-  flash_size: 16MB
-  framework:
-    type: esp-idf
-
-psram:
-  speed: 80MHz
-  mode: octal
-
-wifi:
-  reboot_timeout: 30min
-  enable_btm: true
-  enable_rrm: true
-
-spi:
-  id: display_qspi
-  type: quad
-  clk_pin: 47
-  data_pins: 
-    - 21
-    - 48
-    - 40
-    - 39
-
-i2c:
-  id: touchscreen_bus
-  sda: 4
-  scl: 8
-
-output:
-  - platform: ledc
-    id: gpio_backlight_pwm
-    pin: 1
-
-light:
-  - id: display_backlight
-    name: Backlight
-    platform: monochromatic
-    output: gpio_backlight_pwm
-    restore_mode: ALWAYS_ON
-    default_transition_length: 500ms
-
-display:
-  - platform: mipi_spi
-    id: my_display
-    model: JC3248W535
-
-touchscreen:
-  - platform: axs15231
-    id: my_touch
-    display: my_display
-    update_interval: 150ms
-    # interrupt_pin: 
-      # number: 3
-      # ignore_strapping_warning: true
-    # calibration:
-      # x_min: 0
-      # x_max: 479
-      # y_min: 0
-      # y_max: 319
-
-uart:
-  - id: evse_uart
-    tx_pin: 43
-    rx_pin: 44
-
-
-      # ignore_strapping_warning: true
-    # calibration:
-      # x_min: 0
-      # x_max: 479
-      # y_min: 0
-      # y_max: 319
-
-uart:
-  - id: evse_uart
-    tx_pin: 43
-    rx_pin: 44
-
+lvgl:
+  buffer_size: 25%           # the QSPI panel is flushed in slices
+  rotation: 90

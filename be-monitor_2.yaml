@@ -121,32 +121,6 @@ esphome:
             return str_sprintf("BACKLIGHT %.0f%%", id(bl_level).state);
       - script.execute: emu_boot
 
-esp32:
-  board: esp32-s3-devkitc-1
-  framework:
-    type: esp-idf
-#    sdkconfig_options:
-#      # The S3 display stack leaves little internal RAM for HTTPS OTA checks.
-#      # Allocate mbedTLS buffers from PSRAM so firmware downloads can connect.
-#      CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC: "y"
-#      # Keep the ESP32 task watchdog long enough for display startup while
-#      # remaining compatible with ESPHome 2026.4 and newer.
-#      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "30"
-#      # Keep WiFi startup inside the internal-RAM budget after the RGB display
-#      # and LVGL buffers are initialized.
-#      CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM: "8"
-#      CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: "y"
-#      # The RGB driver already restarts after a genuine DMA underflow. Restarting
-#      # on every VSYNC can instead shift the framebuffer by one bounce-buffer block.
-#      CONFIG_LCD_RGB_RESTART_IN_VSYNC: "n"
-#      CONFIG_LCD_RGB_ISR_IRAM_SAFE: "y"
-#      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
-#      CONFIG_SPIRAM_RODATA: "y"
-
-psram:
-  speed: 80MHz
-  mode: octal
-
 logger:
   baud_rate: 0
   level: INFO
@@ -175,24 +149,21 @@ api:
   encryption:
     key: !secret encryption_key
 
-# --- 4848S040 hardware (verified) -------------------------------------------
-spi:
-  - id: lcd_spi
-    clk_pin: GPIO48
-    mosi_pin: GPIO47
-
-i2c:
-  id: touchscreen_bus
-  sda: GPIO19
-  scl: { number: 45, ignore_strapping_warning: true }
-
-output:
-  - platform: ledc
-    id: gpio_backlight_pwm
-    pin: GPIO38
-    frequency: 150Hz
-    min_power: 0.01
-    zero_means_zero: true
+# --- Hardware --------------------------------------------------------------------
+# Everything that depends on the board and its display lives in pak/. Keep exactly ONE
+# of these lines uncommented; the file for the display you have provides
+#   substitutions  disp_w / disp_h / disp_rot   panel size as the driver reports it and
+#                                               the LVGL rotation (landscape for wide panels)
+#   esp32, psram and the buses
+#   output         gpio_backlight_pwm           built into the `display_backlight` light below
+#   display        my_display
+#   touchscreen    my_touch
+#   lvgl           buffer_size (and rotation)
+# The user interface sizes itself from the resulting screen size. To add a display, copy
+# pak/zz_hw_template.yaml.
+packages:
+  display_hw: !include pak/zz_hw_guition_4848s040.yaml
+  # display_hw: !include pak/zz_hw_guition_jc3248w535.yaml
 
 light:
   - id: display_backlight
@@ -203,44 +174,14 @@ light:
     default_transition_length: 500ms
 
 display:
-  - platform: st7701s
-    id: my_display
-    dimensions:
-      width: 480
-      height: 480
-    spi_mode: MODE3
-    data_rate: 2MHz
-    color_order: RGB
-    invert_colors: False
-    cs_pin: 39
-    de_pin: 18
-    hsync_pin: 16
-    vsync_pin: 17
-    pclk_pin: 21
-    pclk_frequency: 12MHz
-    pclk_inverted: False
-    hsync_pulse_width: 8
-    hsync_front_porch: 10
-    hsync_back_porch: 20
-    vsync_pulse_width: 8
-    vsync_front_porch: 10
-    vsync_back_porch: 10
-    update_interval: never
-    auto_clear_enabled: False
-    init_sequence:
-      - 1
-      - [0xFF, 0x77, 0x01, 0x00, 0x00, 0x10] # CMD2_BKSEL_BK0
-      - [0xCD, 0x00] # disable MDT flag
-    data_pins:
-      red: [11, 12, 13, 14, 0]
-      green: [8, 20, 3, 46, 9, 10]
-      blue: [4, 5, 6, 7, 15]
+  # The panel (my_display) is in the pak. This one mirrors the UI to a VNC client and
+  # has to be the panel's size as the driver reports it.
   - platform: vnc
     id: vnc_display
     password: !secret vnc_password
     dimensions:
-      width: 480
-      height: 480
+      width: ${disp_w}
+      height: ${disp_h}
     on_connect:
       - if:
           condition: lvgl.is_paused
@@ -251,13 +192,8 @@ display:
             - script.execute: wake_backlight
 
 touchscreen:
-  - platform: gt911
-    id: my_touch
-    display: my_display
-    update_interval: 16ms
-    transform:
-      mirror_x: false
-      mirror_y: false
+  # The touch controller (my_touch) is in the pak; what a touch does is decided here.
+  - id: !extend my_touch
     on_release:
       - if:
           condition: lvgl.is_paused
