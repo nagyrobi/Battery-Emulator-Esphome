@@ -76,7 +76,7 @@ Swipe left or right (the pages wrap) or tap a page dot.
 
    The order matters, because ESPHome reads packages bottom to top: `ui_layout` stays above the
    hardware line (its layout is worked out from the size the hardware pak states) and `vnc`
-   stays below it (so the real panel stays LVGL's first display). `vnc` mirrors the screen to a
+   stays below it (so the real panel stays LVGL's first display). `vnc` is optional, mirrors the screen to a
    VNC client, which can click through it; it keeps a copy of the frame in RAM, so it wants
    PSRAM. Comment it out on a board without PSRAM.
 4. On the emulator, enable ESP-NOW. Leave "ESPNow receiver MACs" empty (broadcast) or list this
