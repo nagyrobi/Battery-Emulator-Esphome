@@ -35,8 +35,11 @@
 #   BATTERY INFO  contactors, BMS, CAN links, SOH, limits, balancing and isolation
 #                 of the selected pack. Tap the title for the next pack.
 #   ENERGY        remaining / total / reported energy, lifetime throughput, limits.
-#   DISPLAY MENU  shortcuts, next emulator, screen off.
-#   SYSTEM        emulator and network diagnostics, emulator selector.
+#   DISPLAY MENU  shortcuts, next emulator (only with more than one emulator
+#                 configured), screen off.
+#   SYSTEM        emulator diagnostics and this display's own status. One button per
+#                 configured emulator picks the one being watched - that choice is kept
+#                 in flash and restored at boot - and Display shows the panel's card.
 #
 # With a single pack MAIN and ENERGY follow pack 1. With several they follow the
 # AGGREGATE frame - the installation as the inverter sees it - while the per-pack
@@ -54,10 +57,12 @@
 substitutions:
   device_name: be-monitor-480
   friendly_name: "Battery Monitor 480"
-  # Name and STA MAC of each emulator this panel can watch. These are the single source
-  # of truth: the mapping, the matrix button labels, the on_click arguments and the espnow
-  # peer list all reference them, so each value is written once. Add a fourth by adding a
-  # pair of substitutions, a mapping entry, a matrix button and a peer.
+  # Name and STA MAC of each emulator this panel can watch: three slots. These are the
+  # single source of truth - the SYSTEM buttons, the ESP-NOW peer list and the selection
+  # logic are all built from them.
+  # A slot whose MAC is "" is switched off: no peer, no SYSTEM button, skipped by NEXT
+  # EMULATOR, and with only one slot left NEXT EMULATOR disappears from the menu. Leave
+  # at least one MAC set. Do not delete the lines, empty them.
   emulator_1_name: "Csokihaz-1"
   emulator_1_mac: "a4:cb:8f:d7:c6:28"
   emulator_2_name: "Emulator 2"
@@ -84,17 +89,11 @@ external_components:
     refresh: 60min
     components: [ vnc ]
 
-# Button label -> MAC. Keyed by the text on the matrix button, so the labels below are
-# the only place an emulator is named. Looked up at runtime by select_emulator.
-mapping:
-  - id: emulator_macs
-    from: string
-    to: string
-    default_value: "${emulator_1_mac}"
-    entries:
-      "${emulator_1_name}": "${emulator_1_mac}"
-      "${emulator_2_name}": "${emulator_2_mac}"
-      "${emulator_3_name}": "${emulator_3_mac}"
+# Settings kept across reboots (the watched emulator, the backlight level) reach flash
+# within this time. The default is a minute; a panel that gets unplugged right after a
+# change should not lose it.
+preferences:
+  flash_write_interval: 10s
 
 esphome:
   name: ${device_name}
@@ -104,9 +103,10 @@ esphome:
   # halfway through a C++ build.
   min_version: 2026.9.0
   on_boot:
-    # Everything decoded depends on which emulator is watched, so adopt the first one
-    # before anything else. Nothing is decoded until this runs, because sel_mac starts
-    # all zeroes and no emulator can send from 00:00:00:00:00:00.
+    # Everything decoded depends on which emulator is watched, so adopt one before
+    # anything else (emu_boot: the one saved last time). Nothing is decoded until this
+    # runs, because sel_mac starts all zeroes and no emulator can send from
+    # 00:00:00:00:00:00.
     priority: -100
     then:
       - script.execute:
@@ -119,13 +119,7 @@ esphome:
           text: !lambda |-
             if (std::isnan(id(bl_level).state)) return std::string("BACKLIGHT");
             return str_sprintf("BACKLIGHT %.0f%%", id(bl_level).state);
-      - lvgl.matrix.button.update:
-          id: emu_b1
-          control:
-            checked: true
-      - script.execute:
-          id: select_emulator
-          name: "${emulator_1_name}"
+      - script.execute: emu_boot
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -374,6 +368,13 @@ globals:
     restore_value: no
     initial_value: '0'     # pack shown on CELL MONITOR and BATTERY INFO, 0-based
   # --- emulator selection --------------------------------------------------------
+  # The three slots, from the emulator_N_* substitutions. An empty MAC = slot switched off.
+  - id: emu_macs
+    type: std::vector<std::string>
+    initial_value: '{"${emulator_1_mac | trim}", "${emulator_2_mac | trim}", "${emulator_3_mac | trim}"}'
+  - id: emu_names
+    type: std::vector<std::string>
+    initial_value: '{"${emulator_1_name}", "${emulator_2_name}", "${emulator_3_name}"}'
   # MAC of the emulator being watched. Frames from anyone else are dropped by the decoder,
   # so switching is instant - every candidate is already a registered peer.
   - id: sel_mac
@@ -382,9 +383,11 @@ globals:
   - id: sel_name
     type: std::string
     restore_value: no
+  # Slot being watched (0-2). Kept in flash: select an emulator on SYSTEM (or step to it
+  # with NEXT EMULATOR) and the panel comes back to it after every restart.
   - id: emu_index
     type: int
-    restore_value: no
+    restore_value: yes
     initial_value: '0'
   # --- emulator-wide state, -1 = not reported yet --------------------------------
   - id: st_sys
@@ -517,13 +520,11 @@ globals:
 # MAX_AMOUNT_CELLS is increased upstream.
 espnow:
   max_payload_size: 512
-  # Every candidate is a peer: a frame only reaches on_receive / on_broadcast at all if
-  # its sender is in the peer table, so all of them are registered and the decoder picks
-  # which one to listen to. Switching then costs nothing and loses no frames.
-  peers:
-    - ${emulator_1_mac}
-    - ${emulator_2_mac}
-    - ${emulator_3_mac}
+  # Every configured emulator is a peer (the list drops the empty slots): a frame only
+  # reaches on_receive / on_broadcast at all if its sender is in the peer table, so all of
+  # them are registered and the decoder picks which one to listen to. Switching then costs
+  # nothing and loses no frames.
+  peers: ${ [emulator_1_mac, emulator_2_mac, emulator_3_mac] | map('trim') | select | list }
   # Broadcast path: used when the emulator's "ESPNow receiver MACs" field is empty.
   # No compile-time address filter here - the emulator is chosen at runtime, so the
   # filter is the sel_mac comparison at the top of the decoder.
@@ -1008,38 +1009,43 @@ espnow:
     - then: *decode_be_frame
 
 script:
-  # Adopts the emulator called `name`, which is the mapping key. Each matrix button passes
-  # its own label, so nothing here has to interrogate the widget. Tapping the emulator
-  # already watched (e.g. to leave the Display card) only switches the card back.
+  # Adopts the emulator in slot `slot` (0-2) and remembers it: emu_index is kept in flash.
+  # Tapping the emulator already watched (e.g. to leave the Display card) only switches
+  # the card back, and a slot without a MAC is ignored.
   - id: select_emulator
     mode: restart
     parameters:
-      name: string
+      slot: int
     then:
-      - script.execute:
-          id: show_sys_view
-          view: 0
       - lambda: |-
-          // Mapping returns a std::string; parse it into the 6 bytes the filter compares.
-          // A malformed entry would otherwise leave a half-written MAC, so write only on
-          // a complete parse.
-          const std::string mac = id(emulator_macs)[name];
+          if (slot < 0 || slot > 2 || id(emu_macs)[slot].empty()) {
+            if (id(sel_name).empty()) id(sel_name) = "(none configured)";
+            return;
+          }
+          // Parse the slot's MAC into the 6 bytes the filter compares. A malformed entry
+          // would otherwise leave a half-written MAC, so write only on a complete parse
+          // (the peer list has already rejected anything that is not a MAC at compile time).
           unsigned b[6];
-          if (sscanf(mac.c_str(), "%x:%x:%x:%x:%x:%x",
+          if (sscanf(id(emu_macs)[slot].c_str(), "%x:%x:%x:%x:%x:%x",
                      &b[0], &b[1], &b[2], &b[3], &b[4], &b[5]) != 6) {
-            ESP_LOGW("emu", "no usable MAC for '%s'", name.c_str());
+            ESP_LOGW("emu", "no usable MAC for '%s'", id(emu_names)[slot].c_str());
             return;
           }
           bool same = true;
           for (int k = 0; k < 6; k++) same = same && id(sel_mac)[k] == (uint8_t)b[k];
           if (same) return;
-          id(sel_name) = name;
-          id(emu_index) = name == "${emulator_2_name}" ? 1 : name == "${emulator_3_name}" ? 2 : 0;
+          id(sel_name) = id(emu_names)[slot];
+          id(emu_index) = slot;
           for (int k = 0; k < 6; k++) id(sel_mac)[k] = (uint8_t)b[k];
           // Everything on screen belongs to the emulator we just left.
           id(reset_view).execute();
+      - script.execute:
+          id: show_sys_view
+          view: 0
 
-  # SYSTEM page: 0 = the watched emulator's card, 1 = this display's card.
+  # SYSTEM page: 0 = the watched emulator's card, 1 = this display's card. The selector
+  # buttons work like a radio group, so this also moves the checked look: the watched
+  # emulator's button for view 0, Display for view 1.
   - id: show_sys_view
     mode: restart
     parameters:
@@ -1053,31 +1059,52 @@ script:
             lv_obj_add_flag(id(sys_disp), LV_OBJ_FLAG_HIDDEN);
             lv_obj_remove_flag(id(sys_emu), LV_OBJ_FLAG_HIDDEN);
           }
+          lv_obj_t* tabs[4] = {id(emu_b1), id(emu_b2), id(emu_b3), id(disp_b)};
+          for (int k = 0; k < 4; k++) {
+            const bool on = k == 3 ? view == 1 : (view != 1 && k == id(emu_index));
+            if (on) lv_obj_add_state(tabs[k], LV_STATE_CHECKED);
+            else lv_obj_remove_state(tabs[k], LV_STATE_CHECKED);
+          }
 
-  # DISPLAY MENU "NEXT EMULATOR": steps through the selector and checks its button,
-  # exactly as if that button had been tapped on the SYSTEM page.
+  # Boot, after LVGL is up: hide what is not configured, then adopt the emulator saved
+  # last time - or the first configured one when that slot has been switched off since.
+  - id: emu_boot
+    then:
+      - lambda: |-
+          lv_obj_t* tabs[3] = {id(emu_b1), id(emu_b2), id(emu_b3)};
+          int n = 0;
+          for (int k = 0; k < 3; k++) {
+            if (id(emu_macs)[k].empty()) lv_obj_add_flag(tabs[k], LV_OBJ_FLAG_HIDDEN);
+            else n++;
+          }
+          // With one emulator there is nothing to step to: SCREEN OFF takes the whole row.
+          if (n < 2) {
+            lv_obj_add_flag(id(menu_next), LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_x(id(menu_off), 10);
+            lv_obj_set_width(id(menu_off), 460);
+          }
+      - script.execute:
+          id: select_emulator
+          slot: !lambda |-
+            const int saved = id(emu_index);
+            if (saved >= 0 && saved < 3 && !id(emu_macs)[saved].empty()) return saved;
+            for (int k = 0; k < 3; k++)
+              if (!id(emu_macs)[k].empty()) return k;
+            return -1;
+
+  # DISPLAY MENU "NEXT EMULATOR": steps to the next configured emulator, exactly as if
+  # its button had been tapped on the SYSTEM page.
   - id: next_emulator
     mode: restart
     then:
-      - lambda: 'id(emu_index) = (id(emu_index) + 1) % 3;'
-      - if:
-          condition:
-            lambda: 'return id(emu_index) == 0;'
-          then:
-            - lvgl.matrix.button.update: { id: emu_b1, control: { checked: true } }
-            - script.execute: { id: select_emulator, name: "${emulator_1_name}" }
-      - if:
-          condition:
-            lambda: 'return id(emu_index) == 1;'
-          then:
-            - lvgl.matrix.button.update: { id: emu_b2, control: { checked: true } }
-            - script.execute: { id: select_emulator, name: "${emulator_2_name}" }
-      - if:
-          condition:
-            lambda: 'return id(emu_index) == 2;'
-          then:
-            - lvgl.matrix.button.update: { id: emu_b3, control: { checked: true } }
-            - script.execute: { id: select_emulator, name: "${emulator_3_name}" }
+      - script.execute:
+          id: select_emulator
+          slot: !lambda |-
+            for (int k = 1; k <= 3; k++) {
+              const int s = (id(emu_index) + k) % 3;
+              if (!id(emu_macs)[s].empty()) return s;
+            }
+            return id(emu_index);
       - script.execute:
           id: toast
           text: !lambda 'return "NOW WATCHING  " + id(sel_name);'
@@ -1914,6 +1941,10 @@ lvgl:
       text_color: "0x${c_blue}"
       pressed:
         bg_color: 0x0E2A40
+      checked:                  # the SYSTEM selector's current choice
+        bg_color: 0x0D2410
+        border_color: "0x${c_green}"
+        text_color: "0x${c_green}"
   style_definitions:
     - id: st_page            # every page: the reference's near-black navy
       bg_color: "0x${c_bg}"
@@ -2656,6 +2687,7 @@ lvgl:
             on_click: [ lvgl.page.show: pg_system ]
             widgets: [ label: { text: "SYSTEM", align: CENTER } ]
         - button:
+            id: menu_next               # hidden by emu_boot when only one emulator is set
             x: 10
             y: 332
             width: 220
@@ -2663,6 +2695,7 @@ lvgl:
             on_click: [ script.execute: next_emulator ]
             widgets: [ label: { text: "NEXT EMULATOR", align: CENTER } ]
         - button:
+            id: menu_off                # widened by emu_boot when NEXT EMULATOR is hidden
             x: 240
             y: 332
             width: 220
@@ -2806,67 +2839,44 @@ lvgl:
               - label: { id: v_dup, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 6, grid_cell_x_align: END, grid_cell_y_align: CENTER }
               - label: { text: "FREE HEAP", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 7, grid_cell_y_align: CENTER }
               - label: { id: v_dheap, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 7, grid_cell_x_align: END, grid_cell_y_align: CENTER }
-        # Selector, where the reference has its CONNECTION SETUP button. one_checked
-        # makes the matrix a radio group, and the checked button names the card on
-        # show: an emulator (tapping one also starts watching it) or this display.
-        - buttonmatrix:
-            id: emu_sel
+        # Selector, where the reference has its CONNECTION SETUP button: one button per
+        # configured emulator, then Display. Buttons that emu_boot hides (unconfigured
+        # emulators) drop out of the flex row and the rest share the width. The buttons
+        # behave as a radio group; show_sys_view keeps exactly one of them checked.
+        # Tapping an emulator also starts watching it; Display leaves the watched
+        # emulator alone.
+        - obj:
             x: 10
             y: 380
             width: 460
             height: 62
-            one_checked: true
-            pad_all: 0
-            pad_column: 8
-            border_width: 0
+            scrollable: false
             bg_opa: TRANSP
-            items:
-              text_font: inter_16
-              text_color: "0x${c_blue}"
-              bg_color: "0x${c_card}"
-              bg_opa: COVER
-              border_color: "0x${c_blue}"
-              border_width: 1
-              radius: 10
-              shadow_width: 0
-              pressed:
-                bg_color: 0x0E2A40
-              checked:
-                text_color: "0x${c_green}"
-                border_color: "0x${c_green}"
-                bg_color: 0x0D2410
-            # A buttonmatrix has no on_value - it is a compound widget, not a
-            # value-carrying one. Its individual buttons do carry the normal triggers
-            # though, and ESPHome fires each one only for its own button, so on_click
-            # per button is the way in.
-            rows:
-              - buttons:
-                  - id: emu_b1
-                    text: "${emulator_1_name}"
-                    control: [ checkable: true ]
-                    on_click:
-                      - script.execute:
-                          id: select_emulator
-                          name: "${emulator_1_name}"
-                  - id: emu_b2
-                    text: "${emulator_2_name}"
-                    control: [ checkable: true ]
-                    on_click:
-                      - script.execute:
-                          id: select_emulator
-                          name: "${emulator_2_name}"
-                  - id: emu_b3
-                    text: "${emulator_3_name}"
-                    control: [ checkable: true ]
-                    on_click:
-                      - script.execute:
-                          id: select_emulator
-                          name: "${emulator_3_name}"
-                  # Shows this display's card. The watched emulator does not change.
-                  - id: disp_b
-                    text: "Display"
-                    control: [ checkable: true ]
-                    on_click:
-                      - script.execute:
-                          id: show_sys_view
-                          view: 1
+            border_width: 0
+            pad_all: 0
+            layout:
+              type: FLEX
+              flex_flow: ROW
+              pad_column: 8
+              flex_grow: 1
+            widgets:
+              - button:
+                  id: emu_b1
+                  height: 62
+                  on_click: [ script.execute: { id: select_emulator, slot: 0 } ]
+                  widgets: [ label: { text: "${emulator_1_name}", align: CENTER } ]
+              - button:
+                  id: emu_b2
+                  height: 62
+                  on_click: [ script.execute: { id: select_emulator, slot: 1 } ]
+                  widgets: [ label: { text: "${emulator_2_name}", align: CENTER } ]
+              - button:
+                  id: emu_b3
+                  height: 62
+                  on_click: [ script.execute: { id: select_emulator, slot: 2 } ]
+                  widgets: [ label: { text: "${emulator_3_name}", align: CENTER } ]
+              - button:
+                  id: disp_b
+                  height: 62
+                  on_click: [ script.execute: { id: show_sys_view, view: 1 } ]
+                  widgets: [ label: { text: "Display", align: CENTER } ]
