@@ -182,6 +182,7 @@ packages:
   # display_hw: !include pak/zz_be_mon_hw_sunton_esp32_8048s043c.yaml   # 800x480  RGB, GT911
   # display_hw: !include pak/zz_be_mon_hw_elecrow_crowpanel_5.yaml      # 800x480  RGB, GT911
   # display_hw: !include pak/zz_be_mon_hw_tuya_t3e.yaml                 # 480x480  ST7701S RGB, GT911
+  # display_hw: !include pak/zz_be_mon_hw_lilygo_tpanel_s3.yaml        # 480x480  ST7701S RGB (init over an XL9535 expander), CST3240 touch
   # display_hw: !include pak/zz_be_mon_hw_lilygo_tdisplay_s3_touch.yaml # 320x170  ST7789 (rotated), CST816 touch
   # display_hw: !include pak/zz_be_mon_hw_lilygo_tdisplay_s3.yaml       # 320x170  ST7789 (rotated), no touch: the two buttons page through
   # ESP32 without PSRAM: comment `vnc` out as well

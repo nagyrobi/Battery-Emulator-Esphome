@@ -102,6 +102,7 @@ small below about 3.5".
 | `sunton_esp32_8048s043c` | Sunton ESP32-8048S043C | 800x480 RGB, GT911 | no |
 | `elecrow_crowpanel_5` | Elecrow CrowPanel 5.0" | 800x480 RGB, GT911 | no |
 | `tuya_t3e` | TuYa T3E smart screen | 480x480 ST7701S RGB, GT911 | no |
+| `lilygo_tpanel_s3` | LILYGO T-Panel S3 | 480x480 ST7701S RGB (its init SPI runs through the XL9535 port expander), CST3240 touch (`cst328` platform, I2C 0x1A) | no |
 | `lilygo_tdisplay_s3_touch` | LILYGO T-Display-S3, touch version | 170x320 ST7789 used as 320x170 landscape, CST816 | no |
 | `lilygo_tdisplay_s3` | LILYGO T-Display-S3, no touch | the same; the two buttons page through the screens | no |
 | `esp32_2432s028r` | ESP32-2432S028R "Cheap Yellow Display" (plain ESP32, no PSRAM: comment `vnc` out) | 240x320 ILI9341 used as 320x240 landscape, XPT2046 resistive touch | no |

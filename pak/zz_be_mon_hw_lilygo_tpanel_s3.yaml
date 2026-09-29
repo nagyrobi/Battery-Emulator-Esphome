@@ -1,0 +1,106 @@
+# =============================================================================
+# Hardware pak: LILYGO T-Panel S3 - 4" 480x480, ST7701S RGB panel, CST3240 touch
+#
+# Included from the main config:
+#   packages:
+#     display_hw: !include pak/zz_be_mon_hw_lilygo_tpanel_s3.yaml
+# Not tested on the real board yet.
+#
+# What a pak provides: see zz_be_mon_hw_template.yaml
+#
+# Wiring (LILYGO T-Panel repo, T-Panel V1.2 / V1.3, ESP32-S3R8: 16 MB flash, 8 MB octal PSRAM):
+#   * the RGB data / sync / clock lines are ordinary GPIOs and come from ESPHome's built-in
+#     `T-PANEL-S3` mipi_rgb model, together with the ST7701S init sequence;
+#   * the panel's 3-wire init SPI (CS, SCLK, MOSI) and its reset sit on an XL9535 I2C port
+#     expander (IO17 / IO15 / IO16, reset IO5), so that SPI bus is bit-banged through the
+#     expander: it is only used once, at start-up;
+#   * the CST3240 touch controller shares the I2C bus (SDA 17, SCL 18); its reset is XL9535 IO4,
+#     its interrupt GPIO21; the backlight is GPIO14.
+# =============================================================================
+
+substitutions:
+  disp_w: 480
+  disp_h: 480
+  disp_rot: 0              # square, mounted upright: no rotation
+
+esp32:
+  board: esp32-s3-devkitc-1
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+
+psram:
+  speed: 80MHz
+  mode: octal
+
+i2c:
+  - id: i2c_bus
+    sda: GPIO17
+    scl: GPIO18
+    frequency: 400kHz
+
+xl9535:
+  - id: xl9535_hub
+    i2c_id: i2c_bus
+    address: 0x20
+
+spi:
+  - id: lcd_spi
+    interface: software
+    clk_pin:
+      xl9535: xl9535_hub
+      number: 15
+    mosi_pin:
+      xl9535: xl9535_hub
+      number: 16
+
+output:
+  - platform: ledc
+    id: gpio_backlight_pwm
+    pin: GPIO14
+    frequency: 1000Hz
+    min_power: 0.01
+    zero_means_zero: true
+
+display:
+  - platform: mipi_rgb
+    model: T-PANEL-S3
+    id: my_display
+    update_interval: never
+    auto_clear_enabled: false
+    # The model's own defaults for these two name the expander without saying which one, and
+    # end up as plain GPIO17 / GPIO5 (I2C SDA, a data line): spell them out.
+    cs_pin:
+      xl9535: xl9535_hub
+      number: 17
+    reset_pin:
+      xl9535: xl9535_hub
+      number: 5
+
+# The CST3240 is a mutual-capacitance controller of the CST328 family (16-bit register map,
+# I2C address 0x1A by default), so it takes the `cst328` platform. The CST816 driver reads
+# 8-bit registers and does not fit it. If the panel does not answer at 0x1A, LILYGO's own
+# demo talks to 0x5A: change `address` (and try the `cst226` platform, whose default it is).
+touchscreen:
+  - platform: cst328
+    id: my_touch
+    i2c_id: i2c_bus
+    display: my_display
+    address: 0x1A
+    interrupt_pin: GPIO21
+    reset_pin:
+      xl9535: xl9535_hub
+      number: 4
+      mode:
+        output: true
+      inverted: false
+    update_interval: 16ms    # LVGL detects swipes from successive samples: poll fast
+    on_release:
+      - script.execute: wake_ui
+
+lvgl:
+  displays:
+    - my_display
+  touchscreens:
+    - my_touch
+  buffer_size: 100%          # the RGB panel has PSRAM to spare: render whole frames
