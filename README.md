@@ -7,9 +7,9 @@ built with ESPHome's LVGL component.
 
 `be-monitor_2.yaml` is the config to compile. It needs ESPHome **2026.9.0** or newer.
 
-![480x480](screenshots/overview_480x480.png)
 ![480x320](screenshots/overview_480x320.png)
-![800x480](screenshots/overview_800x480.png)
+
+![480x480](screenshots/overview_480x480.png)
 
 (The three screens of the [same config](be-monitor_2.yaml), rendered from the ESPHome host build with simulated emulator frames: 480x480, 480x320 and 800x480.)
 
