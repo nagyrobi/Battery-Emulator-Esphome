@@ -55,6 +55,7 @@ Swipe left or right (the pages wrap) or tap a page dot.
 
 ## Setup
 
+0. [Set up ESPHome](https://esphome.io/install/) first.
 1. Add a `secrets.yaml` with your `wifi_ssid`, `wifi_password`, `ota_password` and `encryption_key` (and
    `vnc_password` with the optional VNC package, see below).
 2. Emulators, at the top of `be-monitor.yaml`: name and STA MAC of up to three
