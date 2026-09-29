@@ -5,6 +5,8 @@ It listens to the emulator's ESP-NOW telemetry (protocol v2, read-only, no route
 it on various ESP32-based displays, in the look of [sort282-rgb](https://github.com/sort282-rgb/battery-display-esp32-4848s040c),
 built with ESPHome's LVGL component.
 
+You can watch up to 3 independent Battery Emulators at the same time, each supporting even double and triple battery packs.
+
 `be-monitor.yaml` is the config to compile. It needs ESPHome **2026.9.0** or newer.
 
 ## Why [ESPHome](https://esphome.io/)
@@ -12,8 +14,8 @@ built with ESPHome's LVGL component.
 * **Any display:** a board is one small YAML file in `pak/`; ESPHome has drivers for most panels and
   touch controllers, and LVGL draws the same interface on all of them.
 * **A lot of components:** add sensors, relays, MQTT, Bluetooth or anything else from the ESPHome
-  catalogue to the same YAML; the device also appears in Home Assistant through the native API.
-* **Web UI and OTA:** the device can server its own webserver page and takes firmware updates over
+  catalogue to the same YAML; the device also appears in Home Assistant through the native API (not required though!).
+* **Web UI and OTA:** the device can offer its own webserver page and takes firmware updates over
   Wi-Fi, from a browser or the ESPHome dashboard.
 * **Your own build, your own security:** you compile the YAML yourself, from source you can read,
   with your own Wi-Fi credentials and keys (encrypted API, OTA password): no vendor firmware and
@@ -54,7 +56,7 @@ Swipe left or right (the pages wrap) or tap a page dot.
 ## Setup
 
 1. Add a `secrets.yaml` with your `wifi_ssid`, `wifi_password`, `ota_password` and `encryption_key` (and
-   `vnc_password` when you keep the VNC package, see below).
+   `vnc_password` with the optional VNC package, see below).
 2. Emulators, at the top of `be-monitor.yaml`: name and STA MAC of up to three
    (`emulator_N_name` / `emulator_N_mac`). Set a MAC to `""` to switch that emulator off: it
    gets no peer and no button, NEXT EMULATOR skips it, and with one left the panel only deals
@@ -130,7 +132,6 @@ tokens:
 
 Each measure is written `(square, wide)` in pixels at `ui_k = 1`, so tuning the look for one
 kind of screen means changing that number in `zz_be_mon_ui_layout.yaml`.
-
 
 # Checked
 
