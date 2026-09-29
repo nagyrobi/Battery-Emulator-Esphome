@@ -63,12 +63,12 @@ substitutions:
   # A slot whose MAC is "" is switched off: no peer, no SYSTEM button, skipped by NEXT
   # EMULATOR, and with only one slot left NEXT EMULATOR disappears from the menu. Leave
   # at least one MAC set. Do not delete the lines, empty them.
-  emulator_1_name: "Csokihaz-1"
+  emulator_1_name: "Emulator 1"
   emulator_1_mac: "a4:cb:8f:d7:c6:28"
   emulator_2_name: "Emulator 2"
   emulator_2_mac: "A4:CB:8F:D7:28:04"
   emulator_3_name: "Emulator 3"
-  emulator_3_mac: "A4:CB:8F:D7:22:B8"
+  emulator_3_mac: ""
   # Palette of the reference design (ui480.inc U_*() colours), bare RRGGBB so one value
   # serves YAML styles (0x${c}), lambdas (0x${c}) and label recolor markup (#${c} ..#).
   c_bg: "02070D"           # screen
