@@ -70,10 +70,7 @@ substitutions:
   bot_gap: ${ ((2, 0)[ui_wide] * ui_k) | round | int }   # gap between its two lines
   warn_h: ${ ((34, 26)[ui_wide] * ui_k) | round | int }   # event bar
   # --- BATTERIES
-  bt_tx: ${ ((15, -12)[ui_wide] * ui_k) | round | int }   # pack title: from the left (square) / right (wide) edge
-  bt_ty: ${ ((9, 5)[ui_wide] * ui_k) | round | int }
-  bt_x: ${ ((15, 12)[ui_wide] * ui_k) | round | int }   # pack text
-  bt_y: ${ ((38, 5)[ui_wide] * ui_k) | round | int }
+  bt_x: ${ ((10, 8)[ui_wide] * ui_k) | round | int }   # pack text: margin inside its card
   bt_ls: ${ ((6, 3)[ui_wide] * ui_k) | round | int }   # line spacing of the pack text
   # --- CELL MONITOR
   st_h: ${ ((74, 60)[ui_wide] * ui_k) | round | int }   # MIN / MAX / DELTA / TEMP cards
@@ -122,15 +119,14 @@ substitutions:
   soc_grow: ${ (3, 1)[ui_wide] }       # MAIN: the arc card and the POWER / CURRENT column share the width
   pc_grow: ${ (2, 1)[ui_wide] }
   arc_pct: 92                          # arc size, of its card
-  bot_c1: 142                          # bottom card: weights of its three columns
-  bot_c2: 160
-  bot_c3: 150
+  bot_c1: 158                          # bottom card: weights of its three columns
+  bot_c2: 137
+  bot_c3: 155
   ar: ${ ui_k * (1, 0.75)[ui_wide] }   # scale of the flow arrow
   arr_w: ${ (27 * ar) | round | int }
   arr_h: ${ (18 * ar) | round | int }
   arr_in: ${ [[(10 * ar) | int, 0], [0, (9 * ar) | int], [(10 * ar) | int, (18 * ar) | int], [0, (9 * ar) | int], [(27 * ar) | int, (9 * ar) | int]] }
   arr_out: ${ [[(17 * ar) | int, 0], [(27 * ar) | int, (9 * ar) | int], [(17 * ar) | int, (18 * ar) | int], [(27 * ar) | int, (9 * ar) | int], [0, (9 * ar) | int]] }
-  bt_align: ${ ('TOP_LEFT', 'TOP_RIGHT')[ui_wide] }   # BATTERIES: pack title beside the text on wide screens
   bt_w: ${ cw - 2 * bt_x }
   sys_emu_rows: ${ [sh_h] + [sr_h] * 12 + [sn_h] + [sr_h] * 5 }
   sys_disp_rows: ${ [sh_h, 'FR(4)'] + ['FR(3)'] * 6 }
@@ -143,6 +139,13 @@ substitutions:
   fs_ttl: ${ (32 * ui_f) | round | int }
   fs_soc: ${ ((48, 28)[ui_wide] * ui_k) | round | int }
   fs_volt: ${ ((32, 22)[ui_wide] * ui_k) | round | int }
+  fs_dir: ${ [((26, 22)[ui_wide] * ui_k) | round | int, 8] | max }   # header direction text
+  fs_pk1: ${ [((22) * ui_k) | round | int, 7] | max }
+  fs_pk2: ${ [((19) * ui_k) | round | int, 7] | max }
+  fs_pk3: ${ [((17) * ui_k) | round | int, 7] | max }
+  fs_pk4: ${ [((15) * ui_k) | round | int, 7] | max }
+  fs_pk5: ${ [((13) * ui_k) | round | int, 7] | max }
+  fs_pk6: ${ [((11) * ui_k) | round | int, 7] | max }
   fs_big: ${ (48 * ui_f) | round | int }
   fs_hint: ${ [((12) * ui_f) | round | int, 7] | max }
   fs_s: ${ [((14) * ui_f) | round | int, 7] | max }

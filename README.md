@@ -34,8 +34,8 @@ Pages, each one stacked as title bar, blocks that share the remaining height, an
 | Page | Content |
 |---|---|
 | MAIN | Status header with animated battery, flow arrow and emulator status. SOC arc with pack voltage, power, current, cell max/min, delta (green below 100 mV, amber up to 300 mV, red above) and temperature. With several packs the cell columns show the installation's scaled remaining/total energy and max discharge/charge power. An amber (red for errors) bar links to an active event. |
-| BATTERIES | One card per pack (only with more than one pack). Tap a card for its cells. |
-| CELL MONITOR | All cells of the selected pack; lowest, highest and balancing cells marked. Tap or drag across the bars to read cells. |
+| BATTERIES | One card per pack (only with more than one pack), its three lines of text in the largest font that fits the card's full width. Tap a card for its cells. |
+| CELL MONITOR | All cells of the selected pack; lowest, highest and balancing cells marked. Tap or drag across the bars to read cells (dragging over the bars does not change the page; swipe from outside the chart). |
 | EVENTS | The emulator's 10 newest events. |
 | BATTERY INFO | Contactors, BMS, CAN links, limits, balancing, isolation. |
 | ENERGY | Remaining and total energy as the inverter is given it: the SOC window when the emulator scales its SOC, with the real values small beside them (left out when nothing is scaled). Lifetime throughput, limits. |
@@ -125,8 +125,7 @@ tokens:
 
 * a **square** screen (480x480) gets the reference layout;
 * a **landscape** screen (width at least 1.25 x height) gets a compact arrangement of the same
-  pages: the SOC arc beside POWER / CURRENT, a shorter bottom card, the pack text beside the
-  pack title, and so on;
+  pages: the SOC arc beside POWER / CURRENT, a shorter bottom card, and so on;
 * everything is scaled by `ui_k`, 1 at 480x480 and 480x320: 0.85 at 480x272, 1.5 at 800x480,
   1.875 at 1024x600. Fonts are generated at the scaled sizes.
 

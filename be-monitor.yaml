@@ -214,10 +214,15 @@ font:
     size: ${fs_cap}
     bpp: 4
     glyphs: &ui_glyphs
-      - ' !"#$%&''()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~°·Δ'
+      - ' !"#$%&''()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~°·Δ—'
   - file: "gfonts://Inter@500"
     id: f_txt                    # body text
     size: ${fs_txt}
+    bpp: 4
+    glyphs: *ui_glyphs
+  - file: "gfonts://Inter Tight@500"
+    id: f_mb                     # main page bottom card, energy / power limit lines (narrower, so they fit their column)
+    size: ${fs_val}
     bpp: 4
     glyphs: *ui_glyphs
   - file: "gfonts://Inter@500"
@@ -245,6 +250,43 @@ font:
     size: ${fs_volt}
     bpp: 4
     glyphs: ' 0123456789.-V'
+  - file: "gfonts://Inter Tight@600"
+    id: f_dir                    # the header's CHARGING / DISCHARGING / IDLE / NO LIVE DATA
+    size: ${fs_dir}
+    bpp: 4
+    glyphs: ' ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+  # The pack text on BATTERIES takes the largest of these whose widest line fits the card
+  # (and whose three lines fit its height): the decoder picks, per update.
+  - file: "gfonts://Inter Tight@500"
+    id: f_pk1
+    size: ${fs_pk1}
+    bpp: 4
+    glyphs: *ui_glyphs
+  - file: "gfonts://Inter Tight@500"
+    id: f_pk2
+    size: ${fs_pk2}
+    bpp: 4
+    glyphs: *ui_glyphs
+  - file: "gfonts://Inter Tight@500"
+    id: f_pk3
+    size: ${fs_pk3}
+    bpp: 4
+    glyphs: *ui_glyphs
+  - file: "gfonts://Inter Tight@500"
+    id: f_pk4
+    size: ${fs_pk4}
+    bpp: 4
+    glyphs: *ui_glyphs
+  - file: "gfonts://Inter Tight@500"
+    id: f_pk5
+    size: ${fs_pk5}
+    bpp: 4
+    glyphs: *ui_glyphs
+  - file: "gfonts://Inter Tight@500"
+    id: f_pk6
+    size: ${fs_pk6}
+    bpp: 4
+    glyphs: *ui_glyphs
   - file: "gfonts://Montserrat@400"
     id: m_hint
     size: ${fs_hint}
@@ -820,10 +862,10 @@ espnow:
               // installation's scaled energy and power limits instead - the cells are on
               // the BATTERIES and CELL MONITOR pages. render_link picks the visible set.
               if (multi) {
-                if (!std::isnan(rremw)) putf(id(v_mrem), "rem. %.1f kWh", rremw / 1000.0f);
-                if (!std::isnan(rcapw)) putf(id(v_mtot), "tot. %.1f kWh", rcapw / 1000.0f);
-                if (!std::isnan(mdw))   putf(id(v_mdis), "max dis %.1f kW", mdw / 1000.0f);
-                if (!std::isnan(mcw))   putf(id(v_mchg), "max chg %.1f kW", mcw / 1000.0f);
+                if (!std::isnan(rremw)) putf(id(v_mrem), "Remain %.1f kWh", rremw / 1000.0f);
+                if (!std::isnan(rcapw)) putf(id(v_mtot), "Total %.1f kWh", rcapw / 1000.0f);
+                if (!std::isnan(mdw))   putf(id(v_mdis), "Max — %.1f kW", mdw / 1000.0f);
+                if (!std::isnan(mcw))   putf(id(v_mchg), "Max + %.1f kW", mcw / 1000.0f);
               } else {
                 // Out-of-range cells go red against pack 1's design limits, or the
                 // reference's 3.000 / 4.250 V while those are not known.
@@ -926,6 +968,30 @@ espnow:
                       fs("%.0f", cmax > 0 ? (float)cmax : NAN) + " mV, Δ " +
                       fs("%.0f", (cmin > 0 && cmax > 0) ? (float)(cmax - cmin) : NAN) +
                       " mV, Temp " + fs("%.1f", tmin) + "/" + fs("%.1f", tmax) + " °C";
+                  // The text takes the largest font whose widest line fits the label and
+                  // whose three lines fit the card.
+                  const lv_font_t* ladder[6] = {id(f_pk1)->get_lv_font(), id(f_pk2)->get_lv_font(),
+                                                id(f_pk3)->get_lv_font(), id(f_pk4)->get_lv_font(),
+                                                id(f_pk5)->get_lv_font(), id(f_pk6)->get_lv_font()};
+                  lv_obj_update_layout(lv_obj_get_parent(bt[ps]));
+                  const int aw = lv_obj_get_width(bt[ps]);
+                  const int ah = lv_obj_get_height(lv_obj_get_parent(bt[ps])) - 2 * ${cap_y};
+                  const int ls = ${bt_ls};
+                  const lv_font_t* pick = ladder[5];
+                  for (int fi = 0; fi < 6; fi++) {
+                    int widest = 0;
+                    for (size_t from = 0; from < t.size();) {
+                      size_t to = t.find('\n', from);
+                      if (to == std::string::npos) to = t.size();
+                      lv_point_t sz;
+                      lv_text_get_size(&sz, t.substr(from, to - from).c_str(), ladder[fi], 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                      if (sz.x > widest) widest = sz.x;
+                      from = to + 1;
+                    }
+                    if (widest <= aw && 3 * (int) lv_font_get_line_height(ladder[fi]) + 2 * ls <= ah) { pick = ladder[fi]; break; }
+                  }
+                  if (lv_obj_get_style_text_font(bt[ps], LV_PART_MAIN) != pick)
+                    lv_obj_set_style_text_font(bt[ps], pick, LV_PART_MAIN);
                   put(bt[ps], t.c_str());
                   col(bt[ps], chg == 1 ? 0x${c_green} : chg == 2 ? 0x${c_blue} : 0xFFFFFF);
                 }
@@ -1125,8 +1191,8 @@ script:
           struct { lv_obj_t* l; const char* t; } blank[] = {
             {id(v_cmax), "MAX -- V"}, {id(v_cmin), "MIN  -- V"}, {id(v_delta), "Δ -- mV"},
             {id(v_temp), "--.-°C"},
-            {id(v_mrem), "rem. -- kWh"}, {id(v_mtot), "tot. -- kWh"},
-            {id(v_mdis), "max dis -- kW"}, {id(v_mchg), "max chg -- kW"},
+            {id(v_mrem), "Remain -- kWh"}, {id(v_mtot), "Total -- kWh"},
+            {id(v_mdis), "Max — -- kW"}, {id(v_mchg), "Max + -- kW"},
             {id(bt_1), "WAITING FOR DATA"}, {id(bt_2), "WAITING FOR DATA"},
             {id(bt_3), "WAITING FOR DATA"},
             {id(c_tmp_v), "--\n--"},
@@ -2098,7 +2164,7 @@ lvgl:
               # takes no room in the row.
               - line: { id: arrow_in,  width: "${arr_w}", height: "${arr_h}", points: "${arr_in}",  line_width: "${arr_lw}", line_rounded: true, line_color: "0x${c_green}", hidden: true }
               - line: { id: arrow_out, width: "${arr_w}", height: "${arr_h}", points: "${arr_out}", line_width: "${arr_lw}", line_rounded: true, line_color: "0x${c_blue}", hidden: true }
-              - label: { id: v_dir, flex_grow: 1, long_mode: CLIP, text: "NO LIVE DATA", text_font: f_val, text_color: "0x${c_red}" }
+              - label: { id: v_dir, flex_grow: 1, long_mode: CLIP, text: "NO LIVE DATA", text_font: f_dir, text_color: "0x${c_red}" }
               - obj: { styles: st_rule, width: 1, height: "${rule_h}", clickable: false }
               - obj:
                   styles: st_bare
@@ -2223,8 +2289,8 @@ lvgl:
                         widgets:
                           - label: { id: v_cmax, text: "MAX -- V", text_font: m_xl, text_color: "0x${c_muted}", on_click: [ script.execute: { id: focus_extreme, want_max: true } ] }
                           - label: { id: v_cmin, text: "MIN  -- V", text_font: m_xl, text_color: "0x${c_muted}", on_click: [ script.execute: { id: focus_extreme, want_max: false } ] }
-                          - label: { id: v_mrem, text: "rem. -- kWh", text_font: f_val, text_color: "0x${c_blue}", hidden: true }
-                          - label: { id: v_mtot, text: "tot. -- kWh", text_font: f_val, text_color: "0x${c_blue}", hidden: true }
+                          - label: { id: v_mrem, text: "Remain -- kWh", text_font: f_mb, text_color: "0x${c_blue}", hidden: true }
+                          - label: { id: v_mtot, text: "Total -- kWh", text_font: f_mb, text_color: "0x${c_blue}", hidden: true }
                     - obj: { id: sep_a, styles: st_rule, grid_cell_column_pos: 1, grid_cell_row_pos: 0, grid_cell_x_align: STRETCH, grid_cell_y_align: CENTER, height: 72% }
                     - obj:                 # column 2: cell delta, or the power limits
                         styles: st_bare
@@ -2237,8 +2303,8 @@ lvgl:
                         layout: { type: FLEX, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER, flex_align_track: CENTER, pad_row: "${bot_gap}" }
                         widgets:
                           - label: { id: v_delta, text: "Δ -- mV", text_font: f_ttl, text_color: "0x${c_muted}" }
-                          - label: { id: v_mdis, text: "max dis -- kW", text_font: f_val, text_color: "0x${c_blue}", hidden: true }
-                          - label: { id: v_mchg, text: "max chg -- kW", text_font: f_val, text_color: "0x${c_green}", hidden: true }
+                          - label: { id: v_mdis, text: "Max — -- kW", text_font: f_mb, text_color: "0x${c_blue}", hidden: true }
+                          - label: { id: v_mchg, text: "Max + -- kW", text_font: f_mb, text_color: "0x${c_green}", hidden: true }
                     - obj: { id: sep_b, styles: st_rule, grid_cell_column_pos: 3, grid_cell_row_pos: 0, grid_cell_x_align: STRETCH, grid_cell_y_align: CENTER, height: 72% }
                     - obj:                 # column 3: the hottest cell
                         styles: st_bare
@@ -2302,8 +2368,7 @@ lvgl:
               - script.execute: { id: select_pack, pack: 0 }
               - lvgl.page.show: pg_cells
             widgets:
-              - label: { align: "${bt_align}", x: "${bt_tx}", y: "${bt_ty}", text: "BATTERY 1", text_font: m_l, text_color: "0x${c_green}" }
-              - label: { id: bt_1, align: TOP_LEFT, x: "${bt_x}", y: "${bt_y}", width: "${bt_w}", text: "WAITING FOR DATA", text_font: f_cap, text_line_space: "${bt_ls}", text_color: "0x${c_muted}" }
+              - label: { id: bt_1, align: LEFT_MID, x: "${bt_x}", width: "${bt_w}", text: "WAITING FOR DATA", text_font: f_txt, text_line_space: "${bt_ls}", text_color: "0x${c_muted}" }
         - obj:
             id: bc_2
             styles: st_card
@@ -2316,8 +2381,7 @@ lvgl:
               - script.execute: { id: select_pack, pack: 1 }
               - lvgl.page.show: pg_cells
             widgets:
-              - label: { align: "${bt_align}", x: "${bt_tx}", y: "${bt_ty}", text: "BATTERY 2", text_font: m_l, text_color: "0x${c_blue}" }
-              - label: { id: bt_2, align: TOP_LEFT, x: "${bt_x}", y: "${bt_y}", width: "${bt_w}", text: "WAITING FOR DATA", text_font: f_cap, text_line_space: "${bt_ls}", text_color: "0x${c_muted}" }
+              - label: { id: bt_2, align: LEFT_MID, x: "${bt_x}", width: "${bt_w}", text: "WAITING FOR DATA", text_font: f_txt, text_line_space: "${bt_ls}", text_color: "0x${c_muted}" }
         - obj:
             id: bc_3
             styles: st_card
@@ -2330,8 +2394,7 @@ lvgl:
               - script.execute: { id: select_pack, pack: 2 }
               - lvgl.page.show: pg_cells
             widgets:
-              - label: { align: "${bt_align}", x: "${bt_tx}", y: "${bt_ty}", text: "BATTERY 3", text_font: m_l, text_color: "0x${c_blue}" }
-              - label: { id: bt_3, align: TOP_LEFT, x: "${bt_x}", y: "${bt_y}", width: "${bt_w}", text: "WAITING FOR DATA", text_font: f_cap, text_line_space: "${bt_ls}", text_color: "0x${c_muted}" }
+              - label: { id: bt_3, align: LEFT_MID, x: "${bt_x}", width: "${bt_w}", text: "WAITING FOR DATA", text_font: f_txt, text_line_space: "${bt_ls}", text_color: "0x${c_muted}" }
         - label: { width: 100%, text: "TAP A BATTERY FOR ITS CELLS   |   SWIPE FOR MORE", text_align: CENTER, text_font: m_hint, text_color: "0x${c_muted}" }
 
     # =========================================================================
@@ -2429,6 +2492,7 @@ lvgl:
             styles: st_bare
             width: 100%
             flex_grow: 1
+            gesture_bubble: false       # dragging across the bars reads cells, it does not swipe the page
             on_draw_main_end:
               - lambda: |-
                   const int b = id(sel_pack), n = id(cell_n)[b];
