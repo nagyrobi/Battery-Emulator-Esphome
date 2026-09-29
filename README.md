@@ -77,7 +77,7 @@ Pages, each one stacked as title bar, blocks that share the remaining height, an
 | CELL MONITOR | All cells of the selected pack; lowest, highest and balancing cells marked. Tap or drag across the bars to read cells. |
 | EVENTS | The emulator's 10 newest events. |
 | BATTERY INFO | Contactors, BMS, CAN links, limits, balancing, isolation. |
-| ENERGY | Remaining, total and reported energy, lifetime throughput, limits. |
+| ENERGY | Remaining and total energy as the inverter is given it: the SOC window when the emulator scales its SOC, with the real values small beside them (left out when nothing is scaled). Lifetime throughput, limits. |
 | DISPLAY MENU | Shortcuts, next emulator, screen off. |
 | SYSTEM | One button per configured emulator picks the one being watched and shows its diagnostics; **Display** shows this panel: backlight slider (kept across restarts), MAC, SSID, signal, IP, uptime, free heap. |
 

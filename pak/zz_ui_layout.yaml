@@ -53,8 +53,7 @@ substitutions:
   bat_h: ${ ((29, 22)[ui_wide] * ui_k) | round | int }
   bat_r: ${ ((5, 4)[ui_wide] * ui_k) | round | int }
   bat_bw: ${ ((2, 2)[ui_wide] * ui_k) | round | int }
-  bat_pad: ${ ((3, 2)[ui_wide] * ui_k) | round | int }
-  bcw: ${ ((9, 6)[ui_wide] * ui_k) | round | int }   # one of its four cells
+  bcw: ${ ((10, 7)[ui_wide] * ui_k) | round | int }   # one of its four cells
   bch: ${ ((17, 12)[ui_wide] * ui_k) | round | int }
   bcg: ${ ((3, 2)[ui_wide] * ui_k) | round | int }   # space between cells
   tip_w: ${ ((7, 5)[ui_wide] * ui_k) | round | int }   # battery terminal

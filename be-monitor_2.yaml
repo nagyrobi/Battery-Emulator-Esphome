@@ -40,7 +40,9 @@
 #   EVENTS        the emulator's 10 most recent events, newest first.
 #   BATTERY INFO  contactors, BMS, CAN links, SOH, limits, balancing and isolation
 #                 of the selected pack. Tap the title for the next pack.
-#   ENERGY        remaining / total / reported energy, lifetime throughput, limits.
+#   ENERGY        remaining / total energy as the inverter is given it (the SOC window when
+#                 the emulator scales its SOC, with the real values small beside them),
+#                 lifetime throughput, limits.
 #   DISPLAY MENU  shortcuts, next emulator (only with more than one emulator
 #                 configured), screen off.
 #   SYSTEM        emulator diagnostics and this display's own status. One button per
@@ -418,6 +420,16 @@ globals:
   # m_live: installation readings arrived within live_watchdog's window. Stays false
   # while the emulator talks but has no battery data, which the page shows as such.
   - id: m_live
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  # ENERGY: the reported value differs from the real one = SOC scaling is on. Kept per
+  # pair, because a frame need not carry both members of both.
+  - id: en_sc_rem
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: en_sc_cap
     type: bool
     restore_value: no
     initial_value: 'false'
@@ -870,14 +882,30 @@ espnow:
                 if (fabsf(wh) >= 1.0e6f) putf(l, "%.2f MWh", wh / 1.0e6f);
                 else                     putf(l, "%.1f kWh", wh / 1000.0f);
               };
-              if (!std::isnan(remw)) energy(id(v_rem), remw);
-              if (!std::isnan(capw)) energy(id(v_cap), capw);
+              // The big figures are what the inverter is given - the SOC window, when the
+              // emulator scales its SOC - and the real ones sit small beside them, only
+              // while the two differ (a reading that is not in this frame falls back to
+              // the other, for emulators that do not send both).
+              auto efmt = [](float wh) -> std::string {
+                char b[24];
+                if (fabsf(wh) >= 1.0e6f) snprintf(b, sizeof(b), "%.2f MWh", wh / 1.0e6f);
+                else                     snprintf(b, sizeof(b), "%.1f kWh", wh / 1000.0f);
+                return b;
+              };
+              auto differs = [](float a, float b) { return fabsf(a - b) >= 50.0f; };   // Wh
+              if (!std::isnan(rremw) || !std::isnan(remw)) energy(id(v_rem), std::isnan(rremw) ? remw : rremw);
+              if (!std::isnan(rcapw) || !std::isnan(capw)) energy(id(v_cap), std::isnan(rcapw) ? capw : rcapw);
+              if (!std::isnan(remw) && !std::isnan(rremw)) id(en_sc_rem) = differs(remw, rremw);
+              if (!std::isnan(capw) && !std::isnan(rcapw)) id(en_sc_cap) = differs(capw, rcapw);
+              const bool scaled = id(en_sc_rem) || id(en_sc_cap);
+              if (!std::isnan(remw)) putf(id(v_rem_real), "REAL  %s", efmt(remw).c_str());
+              if (!std::isnan(capw)) putf(id(v_rep), "REAL  %s", efmt(capw).c_str());
+              for (auto* o : {id(v_rem_real), id(v_rep)}) {
+                if (scaled) lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+              }
               if (!std::isnan(tchg)) energy(id(v_tchg), tchg);
               if (!std::isnan(tdis)) energy(id(v_tdis), tdis);
               if (!std::isnan(soh))  putf(id(v_soh_e), "SOH %.0f%%", soh);
-              if (!std::isnan(rcapw))
-                putf(id(v_rep), "REPORTED  %s / %.1f kWh",
-                     fs("%.1f", std::isnan(rremw) ? NAN : rremw / 1000.0f).c_str(), rcapw / 1000.0f);
               if (lim >= 0) {
                 put(id(v_limit), lim==0?"LIMITED BY  NOTHING":lim==1?"LIMITED BY  INVERTER":
                                  lim==2?"LIMITED BY  USER SETTING":lim==3?"LIMITED BY  BATTERY":
@@ -1134,7 +1162,8 @@ script:
             {id(v_bal), "BALANCING  --"}, {id(v_canerr), "CAN ERRORS  --"},
             {id(v_iso), "ISOLATION  --"},
             {id(v_rem), "-- kWh"}, {id(v_cap), "-- kWh"}, {id(v_tchg), "-- kWh"},
-            {id(v_tdis), "-- kWh"}, {id(v_soh_e), "SOH --"}, {id(v_rep), "REPORTED  --"},
+            {id(v_tdis), "-- kWh"}, {id(v_soh_e), "SOH --"},
+            {id(v_rem_real), "REAL  --"}, {id(v_rep), "REAL  --"},
             {id(v_limit), "LIMITED BY  --"}, {id(v_ovr), "USER OVERRIDE  --"},
             {id(v_rcur), "CURRENT TO INVERTER  --"},
             {id(v_fw), "--"}, {id(v_host), "--"}, {id(v_uptime), "--"}, {id(v_sysst), "--"},
@@ -1143,6 +1172,10 @@ script:
             {id(v_ssid), "--"}, {id(v_rssi), "--"}, {id(v_ap), "--"},
           };
           for (auto& b : blank) lv_label_set_text(b.l, b.t);
+          // Whether the emulator scales its SOC is learnt again from the next frames.
+          id(en_sc_rem) = false; id(en_sc_cap) = false;
+          lv_obj_add_flag(id(v_rem_real), LV_OBJ_FLAG_HIDDEN);
+          lv_obj_add_flag(id(v_rep), LV_OBJ_FLAG_HIDDEN);
           lv_obj_t* grey[] = {id(v_cmax), id(v_cmin), id(v_delta), id(v_ap), id(v_bal),
                               id(v_limit), id(bt_1), id(bt_2), id(bt_3)};
           for (auto* l : grey) lv_obj_set_style_text_color(l, lv_color_hex(0x${c_muted}), 0);
@@ -2047,7 +2080,7 @@ lvgl:
             border_color: "0x${c_green}"
             pad_left: ${hdr_pl}
             pad_right: ${hdr_pl}
-            layout: { type: FLEX, flex_flow: ROW, flex_align_cross: CENTER, pad_column: "${hdr_gap}" }
+            layout: { type: FLEX, flex_flow: ROW, flex_align_cross: CENTER, flex_align_track: CENTER, pad_column: "${hdr_gap}" }
             on_click:
               - lvgl.page.show: pg_system
             widgets:
@@ -2059,17 +2092,16 @@ lvgl:
                   height: SIZE_CONTENT
                   layout: { type: FLEX, flex_flow: ROW, flex_align_cross: CENTER, pad_column: 0 }
                   widgets:
-                    - obj:
+                    - obj:                     # the cells sit in the middle of the frame
                         styles: st_bare
                         width: ${bat_w}
                         height: ${bat_h}
                         radius: ${bat_r}
                         border_color: "0x${c_green}"
                         border_width: ${bat_bw}
-                        pad_left: ${bat_pad}
                         scrollable: false
                         clickable: false
-                        layout: { type: FLEX, flex_flow: ROW, flex_align_cross: CENTER, pad_column: "${bcg}" }
+                        layout: { type: FLEX, flex_flow: ROW, flex_align_main: CENTER, flex_align_cross: CENTER, flex_align_track: CENTER, pad_column: "${bcg}" }
                         widgets:
                           - obj: { id: bcell0, styles: st_bcell, clickable: false }
                           - obj: { id: bcell1, styles: st_bcell, clickable: false }
@@ -2202,7 +2234,7 @@ lvgl:
                         grid_cell_row_pos: 0
                         grid_cell_x_align: STRETCH
                         grid_cell_y_align: STRETCH
-                        layout: { type: FLEX, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER, pad_row: "${bot_gap}" }
+                        layout: { type: FLEX, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER, flex_align_track: CENTER, pad_row: "${bot_gap}" }
                         widgets:
                           - label: { id: v_cmax, text: "MAX -- V", text_font: m_xl, text_color: "0x${c_muted}", on_click: [ script.execute: { id: focus_extreme, want_max: true } ] }
                           - label: { id: v_cmin, text: "MIN  -- V", text_font: m_xl, text_color: "0x${c_muted}", on_click: [ script.execute: { id: focus_extreme, want_max: false } ] }
@@ -2217,7 +2249,7 @@ lvgl:
                         grid_cell_row_pos: 0
                         grid_cell_x_align: STRETCH
                         grid_cell_y_align: STRETCH
-                        layout: { type: FLEX, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER, pad_row: "${bot_gap}" }
+                        layout: { type: FLEX, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER, flex_align_track: CENTER, pad_row: "${bot_gap}" }
                         widgets:
                           - label: { id: v_delta, text: "Δ -- mV", text_font: f_ttl, text_color: "0x${c_muted}" }
                           - label: { id: v_mdis, text: "max dis -- kW", text_font: f_val, text_color: "0x${c_blue}", hidden: true }
@@ -2231,7 +2263,7 @@ lvgl:
                         grid_cell_row_pos: 0
                         grid_cell_x_align: STRETCH
                         grid_cell_y_align: STRETCH
-                        layout: { type: FLEX, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER }
+                        layout: { type: FLEX, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER, flex_align_track: CENTER }
                         widgets:
                           - label: { id: v_temp, text: "--.-°C", text_font: m_temp, text_color: "0x${c_blue}" }
               - label: { id: v_offline, align: CENTER, width: 96%, text: "", text_align: CENTER, text_font: f_txt, text_color: "0x${c_red}", hidden: true }
@@ -2675,6 +2707,7 @@ lvgl:
                     - label: { align: TOP_LEFT, x: "${pad}", y: "${cap_y}", text: "REMAINING", text_font: f_cap }
                     - label: { id: v_rem, align: CENTER, y: "${ -en_dy }", width: 100%, text: "-- kWh", text_align: CENTER, text_font: f_ttl, text_color: "0x${c_blue}" }
                     - label: { id: v_soh_e, align: BOTTOM_LEFT, x: "${pad}", y: "${ -pad }", text: "SOH --", text_font: f_txt, text_color: "0x${c_green}" }
+                    - label: { id: v_rem_real, align: BOTTOM_RIGHT, x: "${ -pad }", y: "${ -pad }", text: "REAL  --", text_font: f_cap, text_color: "0x${c_muted}", hidden: true }
               - obj:
                   styles: st_card
                   scrollable: false
@@ -2685,7 +2718,7 @@ lvgl:
                   widgets:
                     - label: { align: TOP_LEFT, x: "${pad}", y: "${cap_y}", text: "TOTAL", text_font: f_cap }
                     - label: { id: v_cap, align: CENTER, y: "${ -en_dy }", width: 100%, text: "-- kWh", text_align: CENTER, text_font: f_ttl, text_color: "0x${c_blue}" }
-                    - label: { id: v_rep, align: BOTTOM_LEFT, x: "${pad}", y: "${ -pad }", width: 92%, text: "REPORTED  --", long_mode: DOT, text_font: f_cap, text_color: "0x${c_muted}" }
+                    - label: { id: v_rep, align: BOTTOM_LEFT, x: "${pad}", y: "${ -pad }", width: 92%, text: "REAL  --", long_mode: DOT, text_font: f_cap, text_color: "0x${c_muted}", hidden: true }
               - obj:
                   styles: st_card
                   scrollable: false
