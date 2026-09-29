@@ -6,8 +6,11 @@
 #   packages:
 #     display_hw: !include pak/zz_hw_guition_jc3248w535.yaml
 # NOT YET RUN ON THE BOARD: the panel is a portrait one, so `lvgl: rotation` (90 or 270,
-# whichever puts the top of the UI where you want it) makes it landscape. Flip it if the
-# picture is upside down; the touch follows automatically.
+# whichever puts the top of the UI where you want it) makes it landscape - and disp_rot
+# must say the same. Flip both if the picture is upside down. The touch follows through
+# `display: my_display`. (With the VNC display in the LVGL list, LVGL rotates in software
+# and feeds every display the panel's own 320x480, which is why disp_w / disp_h stay
+# portrait.)
 #
 # What a pak provides: see zz_hw_template.yaml
 # =============================================================================

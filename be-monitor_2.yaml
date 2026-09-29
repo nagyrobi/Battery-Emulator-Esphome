@@ -1,14 +1,20 @@
 # =============================================================================
-# Battery-Emulator ESP-NOW monitor — Guition 4848S040 (ST7701S 480x480 + GT911)
+# Battery-Emulator ESP-NOW monitor - for the Guition ESP32-S3 touch displays
 #
-# UI:   the native 480x480 design of sort282-rgb/battery-display-esp32-4848s040c
-#       (v15.9), rebuilt with the ESPHome LVGL component: the same navy card
-#       layout, palette, Inter / Montserrat typography, SOC arc dashboard, per-cell
-#       bar monitor, event cards, page dots with swipe navigation and the blinking
-#       status heartbeat.
+# Hardware: one line under `packages:` below picks the pak for your display (pak/zz_hw_*).
+#           A pak holds everything that is specific to the board: chip setup, buses,
+#           panel, touch controller, backlight pin and the panel size. To add a display,
+#           copy pak/zz_hw_template.yaml.
+# UI:   the design of sort282-rgb/battery-display-esp32-4848s040c (v15.9), rebuilt
+#       with the ESPHome LVGL component: the same navy card layout, palette,
+#       Inter / Montserrat typography, SOC arc dashboard, per-cell bar monitor, event
+#       cards, page dots with swipe navigation and the blinking status heartbeat.
+#       It sizes itself from the panel: 480x480 squares as in the reference, and
+#       landscape screens (480x320, 480x272, 800x480, 1024x600 ... and a portrait panel
+#       rotated by its pak) get a compact arrangement of the same pages. The measures
+#       are the tokens in pak/zz_ui_layout.yaml; the pages below hold no pixel numbers.
 # Data: the Battery-Emulator ESP-NOW v2 TLV protocol (protocol_version 2), received
 #       straight from the emulator - no router hop, no web polling, read-only.
-# Hardware block reused verbatim from nagyrobi/esp32-evse_esphome-lvgl pak/.
 #
 # Protocol summary (see Software/src/devboard/espnow/espnow.h for the full spec):
 #   header 12 B: 'B','E', ver, frame_type, emu_id(u16), battery_id, flags, uptime(u32)
@@ -162,6 +168,9 @@ api:
 # The user interface sizes itself from the resulting screen size. To add a display, copy
 # pak/zz_hw_template.yaml.
 packages:
+  # The screen-size tokens are worked out from what the hardware pak states, so this one
+  # has to stay ABOVE it: ESPHome reads the packages bottom to top.
+  ui_layout: !include pak/zz_ui_layout.yaml
   display_hw: !include pak/zz_hw_guition_4848s040.yaml
   # display_hw: !include pak/zz_hw_guition_jc3248w535.yaml
 
@@ -218,35 +227,78 @@ touchscreen:
 # The reference ships Inter Medium 14/16/18 for text and Inter Display SemiBold 32/48
 # for the big readings. Google Fonts has no static Inter Display, and Inter Tight
 # SemiBold is its near-identical twin (same tightened spacing), so that stands in for
-# it. The Montserrat sizes the reference also uses are LVGL built-ins (montserrat_NN).
+# it. The reference's Montserrat sizes come from Google Fonts too. Sizes follow the screen
+# (fs_* tokens): the names say what a font is for, the size is 14 / 16 / 18 / 32 / 48 (Inter)
+# and 12 / 14 / 16 / 18 / 20 / 40 (Montserrat) at the reference's 480x480.
 # Glyphs: printable ASCII plus degree, middle dot and the delta of "Δ 12 mV".
 font:
   - file: "gfonts://Inter@500"
-    id: inter_14
-    size: 14
+    id: f_cap                    # captions, small figures
+    size: ${fs_cap}
     bpp: 4
     glyphs: &ui_glyphs
       - ' !"#$%&''()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~°·Δ'
   - file: "gfonts://Inter@500"
-    id: inter_16
-    size: 16
+    id: f_txt                    # body text
+    size: ${fs_txt}
     bpp: 4
     glyphs: *ui_glyphs
   - file: "gfonts://Inter@500"
-    id: inter_18
-    size: 18
+    id: f_val                    # values
+    size: ${fs_val}
     bpp: 4
     glyphs: *ui_glyphs
   - file: "gfonts://Inter Tight@600"
-    id: inter_d32
-    size: 32
+    id: f_ttl                    # page titles, medium readings
+    size: ${fs_ttl}
     bpp: 4
     glyphs: *ui_glyphs
   - file: "gfonts://Inter Tight@600"
-    id: inter_d48
-    size: 48
+    id: f_big                    # SOC, POWER, CURRENT: digits and units only
+    size: ${fs_big}
     bpp: 4
-    glyphs: *ui_glyphs
+    glyphs: ' 0123456789.,+-%kKMWwAVhH'
+  - file: "gfonts://Inter Tight@600"
+    id: f_soc                    # the SOC figure inside the arc: sized to the ring, not the screen
+    size: ${fs_soc}
+    bpp: 4
+    glyphs: ' 0123456789.%-'
+  - file: "gfonts://Inter Tight@600"
+    id: f_volt                   # the pack voltage under it
+    size: ${fs_volt}
+    bpp: 4
+    glyphs: ' 0123456789.-V'
+  - file: "gfonts://Montserrat@400"
+    id: m_hint
+    size: ${fs_hint}
+    bpp: 4
+    glyphs: &mo_glyphs
+      - ' !"#$%&''()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~°·'
+  - file: "gfonts://Montserrat@400"
+    id: m_s
+    size: ${fs_s}
+    bpp: 4
+    glyphs: *mo_glyphs
+  - file: "gfonts://Montserrat@400"
+    id: m_m
+    size: ${fs_m}
+    bpp: 4
+    glyphs: *mo_glyphs
+  - file: "gfonts://Montserrat@400"
+    id: m_l
+    size: ${fs_l}
+    bpp: 4
+    glyphs: *mo_glyphs
+  - file: "gfonts://Montserrat@400"
+    id: m_xl
+    size: ${fs_xl}
+    bpp: 4
+    glyphs: *mo_glyphs
+  - file: "gfonts://Montserrat@400"
+    id: m_temp
+    size: ${fs_temp}
+    bpp: 4
+    glyphs: *mo_glyphs
 
 globals:
   # --- cells: all packs, indexed (battery_id - 1) * 192 + cell -------------------
@@ -754,7 +806,7 @@ espnow:
 
               // POWER is shown unsigned - the direction is in CURRENT, the arrow and the
               // colour. Both cards always share one font size: when either value is too
-              // wide for the 48 px face they step down to 32 px together.
+              // wide for the big face they step down to the title face together.
               char pt[16] = "-- W", ct[16] = "-- A";
               if (!std::isnan(pw)) {
                 const float a = fabsf(pw);
@@ -763,17 +815,16 @@ espnow:
                 else                   snprintf(pt, sizeof(pt), "%.1f kW", a / 1000.0f);
               }
               if (!std::isnan(cur)) snprintf(ct, sizeof(ct), "%+.1f A", cur);
-              const lv_font_t* f48 = id(inter_d48)->get_lv_font();
+              const lv_font_t* f48 = id(f_big)->get_lv_font();
               lv_point_t s1, s2;
               lv_text_get_size(&s1, pt, f48, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
               lv_text_get_size(&s2, ct, f48, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-              const bool compact = s1.x > 174 || s2.x > 174;
-              const lv_font_t* mf = compact ? id(inter_d32)->get_lv_font() : f48;
+              const int room = lv_obj_get_width(id(pow_card)) - 2 * ${pad};
+              const bool compact = room > 0 && (s1.x > room || s2.x > room);
+              const lv_font_t* mf = compact ? id(f_ttl)->get_lv_font() : f48;
               if (lv_obj_get_style_text_font(id(v_pow), LV_PART_MAIN) != mf) {
                 lv_obj_set_style_text_font(id(v_pow), mf, LV_PART_MAIN);
                 lv_obj_set_style_text_font(id(v_cur), mf, LV_PART_MAIN);
-                lv_obj_set_y(id(v_pow), compact ? 54 : 44);
-                lv_obj_set_y(id(v_cur), compact ? 56 : 46);
               }
               put(id(v_pow), pt);  col(id(v_pow), fcol);
               put(id(v_cur), ct);  col(id(v_cur), fcol);
@@ -1016,8 +1067,7 @@ script:
           // With one emulator there is nothing to step to: SCREEN OFF takes the whole row.
           if (n < 2) {
             lv_obj_add_flag(id(menu_next), LV_OBJ_FLAG_HIDDEN);
-            lv_obj_set_x(id(menu_off), 10);
-            lv_obj_set_width(id(menu_off), 460);
+            lv_obj_set_grid_cell(id(menu_off), LV_GRID_ALIGN_STRETCH, 0, 2, LV_GRID_ALIGN_CENTER, 3, 1);
           }
       - script.execute:
           id: select_emulator
@@ -1105,7 +1155,7 @@ script:
 
   # Matches the pack-dependent parts of the UI to the number of packs the emulator
   # reports: the BATTERIES page (and its dot) exist only with more than one, and its
-  # cards take the reference's 2-up or 3-up geometry.
+  # cards (which share the page's height) are as many as the packs.
   - id: apply_battery_count
     mode: restart
     parameters:
@@ -1119,8 +1169,6 @@ script:
           for (int k = 0; k < 3; k++) {
             if (k >= count) { lv_obj_add_flag(cards[k], LV_OBJ_FLAG_HIDDEN); continue; }
             lv_obj_remove_flag(cards[k], LV_OBJ_FLAG_HIDDEN);
-            lv_obj_set_y(cards[k], count == 2 ? 72 + k * 184 : 68 + k * 124);
-            lv_obj_set_height(cards[k], count == 2 ? 172 : 116);
           }
           lv_label_set_text_fmt(id(v_batt_badge), "%d PACKS", count);
           if (!multi) lv_label_set_text(id(v_info_badge), "");
@@ -1277,6 +1325,7 @@ script:
           if (live) {
             lv_obj_add_flag(id(v_offline), LV_OBJ_FLAG_HIDDEN);
             lv_obj_set_style_border_color(id(main_bottom), lv_color_hex(0x${c_line}), 0);
+            lv_obj_set_height(id(main_bottom), ${bot_h});
             return;
           }
           const lv_color_t red = lv_color_hex(0x${c_red});
@@ -1306,15 +1355,14 @@ script:
           lv_label_set_text(id(v_offline), t.c_str());
           lv_obj_remove_flag(id(v_offline), LV_OBJ_FLAG_HIDDEN);
           lv_obj_set_style_border_color(id(main_bottom), red, 0);
-          lv_obj_set_y(id(main_bottom), 365);
-          lv_obj_set_height(id(main_bottom), 84);
+          lv_obj_set_height(id(main_bottom), ${bot_h_off});
           lv_obj_add_flag(id(warn_bar), LV_OBJ_FLAG_HIDDEN);
       - script.execute: render_warning
       - script.execute: render_status
 
   # The amber (red for an error) notification above the page dots, shown while the
-  # newest active warning or error event is live. The bottom card gives up room for
-  # it exactly as in the reference.
+  # newest active warning or error event is live. The blocks above it share what is
+  # left of the page, so showing it needs no arithmetic.
   - id: render_warning
     mode: restart
     then:
@@ -1325,26 +1373,8 @@ script:
             const uint8_t s = id(ev_sev)[k], st = id(ev_state)[k];
             if ((s == 2 || s == 4) && (st == 2 || st == 3) && !id(ev_name)[k].empty()) { w = k; break; }
           }
-          lv_obj_t *mx = id(v_cmax), *mn = id(v_cmin);
-          // The two-line columns of the multi-pack card: top row, bottom row.
-          lv_obj_t* top[2] = {id(v_mrem), id(v_mdis)};
-          lv_obj_t* bot[2] = {id(v_mtot), id(v_mchg)};
           if (w < 0) {
             lv_obj_add_flag(id(warn_bar), LV_OBJ_FLAG_HIDDEN);
-            lv_obj_set_y(id(main_bottom), 365);
-            lv_obj_set_height(id(main_bottom), 74);
-            lv_obj_set_style_text_font(mx, &lv_font_montserrat_20, 0);
-            lv_obj_set_style_text_font(mn, &lv_font_montserrat_20, 0);
-            lv_obj_set_y(mx, 7);
-            lv_obj_set_y(mn, 38);
-            lv_obj_set_y(id(v_delta), 18);
-            lv_obj_set_y(id(v_temp), 14);
-            for (int k = 0; k < 2; k++) {
-              lv_obj_set_style_text_font(top[k], id(inter_18)->get_lv_font(), 0);
-              lv_obj_set_style_text_font(bot[k], id(inter_18)->get_lv_font(), 0);
-              lv_obj_set_y(top[k], 9);
-              lv_obj_set_y(bot[k], 39);
-            }
             return;
           }
           const bool err = id(ev_sev)[w] == 4;
@@ -1357,20 +1387,19 @@ script:
           lv_obj_set_style_border_color(id(warn_bar), c, 0);
           lv_obj_set_style_bg_color(id(warn_bar), lv_color_hex(err ? 0x2A0806 : 0x241700), 0);
           lv_obj_remove_flag(id(warn_bar), LV_OBJ_FLAG_HIDDEN);
-          lv_obj_set_y(id(main_bottom), 356);
-          lv_obj_set_height(id(main_bottom), 58);
-          lv_obj_set_style_text_font(mx, &lv_font_montserrat_18, 0);
-          lv_obj_set_style_text_font(mn, &lv_font_montserrat_18, 0);
-          lv_obj_set_y(mx, 3);
-          lv_obj_set_y(mn, 29);
-          lv_obj_set_y(id(v_delta), 11);
-          lv_obj_set_y(id(v_temp), 8);
-          for (int k = 0; k < 2; k++) {
-            lv_obj_set_style_text_font(top[k], id(inter_16)->get_lv_font(), 0);
-            lv_obj_set_style_text_font(bot[k], id(inter_16)->get_lv_font(), 0);
-            lv_obj_set_y(top[k], 5);
-            lv_obj_set_y(bot[k], 30);
-          }
+      - script.execute: fit_arc
+
+  # The SOC arc is a circle in a card that is not one, and the card changes size when the
+  # event bar comes and goes. Fit the arc to what the card has to offer.
+  - id: fit_arc
+    mode: restart
+    then:
+      - lambda: |-
+          lv_obj_update_layout(id(soc_card));
+          const int w = lv_obj_get_content_width(id(soc_card));
+          const int h = lv_obj_get_content_height(id(soc_card));
+          const int d = (w < h ? w : h) * ${arc_pct} / 100;
+          if (d > 0 && lv_obj_get_width(id(soc_arc)) != d) lv_obj_set_size(id(soc_arc), d, d);
 
   # Header direction text and flow arrow. The arrow never animates - it only turns;
   # the energy flow is animated inside the battery by paint_battery.
@@ -1470,14 +1499,18 @@ script:
 
           // Tags over the lowest / highest bar. Same geometry as the draw event; two
           // nearby extremes sit side by side instead of on top of each other.
-          int slot = 480 / n; if (slot < 1) slot = 1;
-          int bw = slot >= 2 ? slot - 1 : 1; if (bw > 18) bw = 18;
-          const int x0 = (480 - slot * n) / 2 + (slot - bw) / 2;
+          lv_area_t pa;
+          lv_obj_get_coords(id(cell_plot), &pa);
+          const int pw = lv_area_get_width(&pa);
+          const int tw = ${tag_w};
+          int slot = pw / n; if (slot < 1) slot = 1;
+          int bw = slot >= 2 ? slot - 1 : 1; if (bw > ${bar_wmax}) bw = ${bar_wmax};
+          const int x0 = (pw - slot * n) / 2 + (slot - bw) / 2;
           auto clampi = [](int v, int a, int z) { return v < a ? a : (v > z ? z : v); };
-          int mx = clampi(x0 + ilo * slot - 12, 2, 414), Mx = clampi(x0 + ihi * slot - 12, 2, 414);
-          if (abs(mx - Mx) < 68) {
-            const int pl = clampi((mx + Mx) / 2 - 58, 2, 356);
-            mx = pl; Mx = pl + 64;
+          int mx = clampi(x0 + ilo * slot - tw / 5, 2, pw - tw + 2), Mx = clampi(x0 + ihi * slot - tw / 5, 2, pw - tw + 2);
+          if (abs(mx - Mx) < tw) {
+            const int pl = clampi((mx + Mx) / 2 - tw * 6 / 7, 2, pw - 2 * tw + 2);
+            mx = pl; Mx = pl + tw - 4;
           }
           lv_label_set_text_fmt(id(v_min_tag), "%d MIN", ilo + 1);
           lv_label_set_text_fmt(id(v_max_tag), "%d MAX", ihi + 1);
@@ -1516,32 +1549,32 @@ script:
       - lambda: |-
           static lv_obj_t *card[10], *hdr[10], *age[10], *msg[10];
           if (card[0] == nullptr) {
-            const lv_font_t* f14 = id(inter_14)->get_lv_font();
+            const lv_font_t* f14 = id(f_cap)->get_lv_font();
             for (int k = 0; k < 10; k++) {
               lv_obj_t* c = card[k] = lv_obj_create(id(ev_list));
-              lv_obj_set_size(c, 430, 68);
+              lv_obj_set_size(c, lv_pct(100), ${ev_h});
               lv_obj_set_style_bg_color(c, lv_color_hex(0x${c_card}), 0);
               lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
               lv_obj_set_style_border_color(c, lv_color_hex(0x${c_line}), 0);
               lv_obj_set_style_border_width(c, 1, 0);
-              lv_obj_set_style_radius(c, 7, 0);
+              lv_obj_set_style_radius(c, ${ev_r}, 0);
               lv_obj_set_style_pad_all(c, 0, 0);
               lv_obj_set_style_shadow_width(c, 0, 0);
               // Not clickable: a press falls through to the list, which scrolls.
               lv_obj_remove_flag(c, LV_OBJ_FLAG_CLICKABLE);
               lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
               hdr[k] = lv_label_create(c);
-              lv_obj_set_pos(hdr[k], 8, 6);
-              lv_obj_set_width(hdr[k], 322);
+              lv_obj_align(hdr[k], LV_ALIGN_TOP_LEFT, ${ev_ix}, ${ev_ty});
+              lv_obj_set_width(hdr[k], lv_pct(72));
               lv_label_set_long_mode(hdr[k], LV_LABEL_LONG_MODE_DOTS);
               age[k] = lv_label_create(c);
-              lv_obj_set_pos(age[k], 330, 6);
-              lv_obj_set_width(age[k], 92);
+              lv_obj_align(age[k], LV_ALIGN_TOP_RIGHT, -${ev_ix}, ${ev_ty});
+              lv_obj_set_width(age[k], lv_pct(24));
               lv_obj_set_style_text_align(age[k], LV_TEXT_ALIGN_RIGHT, 0);
               lv_obj_set_style_text_color(age[k], lv_color_hex(0x${c_muted}), 0);
               msg[k] = lv_label_create(c);
-              lv_obj_set_pos(msg[k], 8, 26);
-              lv_obj_set_size(msg[k], 414, 36);
+              lv_obj_align(msg[k], LV_ALIGN_TOP_LEFT, ${ev_ix}, ${ev_my});
+              lv_obj_set_size(msg[k], lv_pct(96), ${ev_mh});
               lv_label_set_long_mode(msg[k], LV_LABEL_LONG_MODE_DOTS);
               lv_obj_set_style_text_line_space(msg[k], 2, 0);
               for (lv_obj_t* l : {hdr[k], age[k], msg[k]}) lv_obj_set_style_text_font(l, f14, 0);
@@ -1621,6 +1654,11 @@ script:
             lambda: 'return page == 3;'
           then:
             - script.execute: render_events
+      - if:
+          condition:
+            lambda: 'return page == 0;'
+          then:
+            - script.execute: fit_arc
 
   # Page dots, centred under the pages that are actually in the rotation.
   - id: update_dots
@@ -1630,12 +1668,12 @@ script:
           lv_obj_t* d[8] = {id(dot0), id(dot1), id(dot2), id(dot3), id(dot4), id(dot5), id(dot6), id(dot7)};
           const bool multi = id(n_bat) > 1;
           const int n = multi ? 8 : 7;
-          int x = 240 - (n * 23 - 11) / 2;
+          int x = ${ui_w} / 2 - (n * ${dot_p} - (${dot_p} - ${dot_s})) / 2;
           for (int k = 0; k < 8; k++) {
             if (k == 1 && !multi) { lv_obj_add_flag(d[k], LV_OBJ_FLAG_HIDDEN); continue; }
             lv_obj_remove_flag(d[k], LV_OBJ_FLAG_HIDDEN);
             lv_obj_set_x(d[k], x);
-            x += 23;
+            x += ${dot_p};
             lv_obj_set_style_bg_color(d[k], lv_color_hex(k == id(cur_page) ? 0x${c_green} : 0x${c_dot}), 0);
           }
 
@@ -1851,9 +1889,9 @@ lvgl:
   touchscreens:
     - my_touch
     - vnc_touch
-  buffer_size: 100%
+  # buffer_size and rotation come from the hardware pak.
   color_depth: 16
-  default_font: inter_16
+  default_font: f_txt
   bottom_layer:
     bg_color: "0x${c_bg}"
     bg_opa: COVER
@@ -1870,10 +1908,10 @@ lvgl:
       bg_opa: COVER
       border_width: 1
       border_color: "0x${c_blue}"
-      radius: 9
+      radius: ${rad_s}
       shadow_width: 0
       pad_all: 0
-      text_font: inter_16
+      text_font: f_txt
       text_color: "0x${c_blue}"
       pressed:
         bg_color: 0x0E2A40
@@ -1882,12 +1920,15 @@ lvgl:
         border_color: "0x${c_green}"
         text_color: "0x${c_green}"
   style_definitions:
-    - id: st_page            # every page: the reference's near-black navy
-      bg_color: "0x${c_bg}"
+    - id: st_page            # every page: the reference's near-black navy, and the
+      bg_color: "0x${c_bg}"  # frame the blocks of the page are stacked in
       bg_opa: COVER
       border_width: 0
       radius: 0
-      pad_all: 0
+      pad_left: ${m}
+      pad_right: ${m}
+      pad_top: ${pt}
+      pad_bottom: ${foot}
       text_color: 0xFFFFFF
     - id: st_card            # uCard(): navy card with a 1 px slate border
       bg_color: "0x${c_card}"
@@ -1895,7 +1936,7 @@ lvgl:
       border_color: "0x${c_line}"
       border_width: 1
       border_opa: COVER
-      radius: 12
+      radius: ${rad}
       pad_all: 0
       shadow_width: 0
       text_color: 0xFFFFFF
@@ -1905,10 +1946,16 @@ lvgl:
       border_color: "0x${c_green}"
       border_width: 1
       border_opa: COVER
-      radius: 12
+      radius: ${rad}
       pad_all: 0
       shadow_width: 0
       text_color: "0x${c_green}"
+    - id: st_bare            # layout-only containers: no fill, no frame, no padding
+      bg_opa: TRANSP
+      border_width: 0
+      radius: 0
+      pad_all: 0
+      shadow_width: 0
     - id: st_rule            # 1 px separators
       bg_color: "0x${c_line}"
       bg_opa: COVER
@@ -1916,17 +1963,17 @@ lvgl:
       radius: 0
       pad_all: 0
     - id: st_bcell           # the four blocks inside the header battery
-      width: 9
-      height: 17
+      width: ${bcw}
+      height: ${bch}
       bg_color: "0x${c_green}"
       bg_opa: 70%
       border_width: 0
       radius: 1
       pad_all: 0
     - id: st_dot             # uFooter(): page dots
-      y: 460
-      width: 12
-      height: 12
+      y: ${dot_y}
+      width: ${dot_s}
+      height: ${dot_s}
       radius: CIRCLE
       bg_color: "0x${c_dot}"
       bg_opa: COVER
@@ -1937,35 +1984,45 @@ lvgl:
     widgets:
       # One row of dots for all pages, re-centred by update_dots when the BATTERIES
       # page joins or leaves the rotation.
-      - obj: { id: dot0, styles: st_dot, x: 160, ext_click_area: 6, on_click: [ lvgl.page.show: pg_main ] }
-      - obj: { id: dot1, styles: st_dot, x: 183, ext_click_area: 6, hidden: true, on_click: [ lvgl.page.show: pg_batt ] }
-      - obj: { id: dot2, styles: st_dot, x: 183, ext_click_area: 6, on_click: [ lvgl.page.show: pg_cells ] }
-      - obj: { id: dot3, styles: st_dot, x: 206, ext_click_area: 6, on_click: [ lvgl.page.show: pg_events ] }
-      - obj: { id: dot4, styles: st_dot, x: 229, ext_click_area: 6, on_click: [ lvgl.page.show: pg_info ] }
-      - obj: { id: dot5, styles: st_dot, x: 252, ext_click_area: 6, on_click: [ lvgl.page.show: pg_energy ] }
-      - obj: { id: dot6, styles: st_dot, x: 275, ext_click_area: 6, on_click: [ lvgl.page.show: pg_menu ] }
-      - obj: { id: dot7, styles: st_dot, x: 298, ext_click_area: 6, on_click: [ lvgl.page.show: pg_system ] }
+      - obj: { id: dot0, styles: st_dot, x: 0, ext_click_area: "${dot_ext}", on_click: [ lvgl.page.show: pg_main ] }
+      - obj: { id: dot1, styles: st_dot, x: 0, ext_click_area: "${dot_ext}", hidden: true, on_click: [ lvgl.page.show: pg_batt ] }
+      - obj: { id: dot2, styles: st_dot, x: 0, ext_click_area: "${dot_ext}", on_click: [ lvgl.page.show: pg_cells ] }
+      - obj: { id: dot3, styles: st_dot, x: 0, ext_click_area: "${dot_ext}", on_click: [ lvgl.page.show: pg_events ] }
+      - obj: { id: dot4, styles: st_dot, x: 0, ext_click_area: "${dot_ext}", on_click: [ lvgl.page.show: pg_info ] }
+      - obj: { id: dot5, styles: st_dot, x: 0, ext_click_area: "${dot_ext}", on_click: [ lvgl.page.show: pg_energy ] }
+      - obj: { id: dot6, styles: st_dot, x: 0, ext_click_area: "${dot_ext}", on_click: [ lvgl.page.show: pg_menu ] }
+      - obj: { id: dot7, styles: st_dot, x: 0, ext_click_area: "${dot_ext}", on_click: [ lvgl.page.show: pg_system ] }
       - obj:
           id: hb
-          x: 464
-          y: 464
-          width: 8
-          height: 8
+          align: BOTTOM_RIGHT
+          x: "${ -hb_edge }"
+          y: "${ -hb_edge }"
+          width: ${hb_s}
+          height: ${hb_s}
           radius: CIRCLE
           bg_color: "0x${c_green}"
           bg_opa: COVER
           border_width: 0
           shadow_color: "0x${c_green}"
-          shadow_width: 7
+          shadow_width: ${hb_glow}
           shadow_opa: 60%
           clickable: false
           hidden: true
   pages:
     # =========================================================================
     # MAIN - uBuildDashboard()
+    #
+    # Every page is a column: title bar, then the blocks of the page, and the strip for
+    # the page dots below (the padding of st_page). The blocks share out what is left, so
+    # the same YAML serves a square 480x480 and a wide screen - see the ui_* tokens.
     # =========================================================================
     - id: pg_main
       styles: st_page
+      scrollable: false
+      layout: &pg_column
+        type: FLEX
+        flex_flow: COLUMN
+        pad_row: ${g}
       on_load:
         - script.execute: { id: page_loaded, page: 0 }
       # A swipe swallows the rest of its touch. LVGL sends CLICKED on release even
@@ -1985,166 +2042,224 @@ lvgl:
             id: hdr
             styles: st_card
             scrollable: false
-            x: 10
-            y: 8
-            width: 460
-            height: 55
+            width: 100%
+            height: ${hdr_h}
             border_color: "0x${c_green}"
+            pad_left: ${hdr_pl}
+            pad_right: ${hdr_pl}
+            layout: { type: FLEX, flex_flow: ROW, flex_align_cross: CENTER, pad_column: "${hdr_gap}" }
             on_click:
               - lvgl.page.show: pg_system
             widgets:
-              - obj:
-                  x: 14
-                  y: 13
-                  width: 62
-                  height: 29
-                  radius: 5
-                  bg_opa: TRANSP
-                  border_color: "0x${c_green}"
-                  border_width: 2
-                  pad_all: 0
+              - obj:                       # the battery: frame, four cells, terminal
+                  styles: st_bare
+                  scrollable: false
                   clickable: false
+                  width: SIZE_CONTENT
+                  height: SIZE_CONTENT
+                  layout: { type: FLEX, flex_flow: ROW, flex_align_cross: CENTER, pad_column: 0 }
                   widgets:
-                    - obj: { id: bcell0, styles: st_bcell, x: 3, y: 4, clickable: false }
-                    - obj: { id: bcell1, styles: st_bcell, x: 15, y: 4, clickable: false }
-                    - obj: { id: bcell2, styles: st_bcell, x: 27, y: 4, clickable: false }
-                    - obj: { id: bcell3, styles: st_bcell, x: 39, y: 4, clickable: false }
-              - obj: { x: 76, y: 21, width: 7, height: 11, radius: 2, bg_color: "0x${c_green}", bg_opa: COVER, border_width: 0, pad_all: 0, clickable: false }
+                    - obj:
+                        styles: st_bare
+                        width: ${bat_w}
+                        height: ${bat_h}
+                        radius: ${bat_r}
+                        border_color: "0x${c_green}"
+                        border_width: ${bat_bw}
+                        pad_left: ${bat_pad}
+                        scrollable: false
+                        clickable: false
+                        layout: { type: FLEX, flex_flow: ROW, flex_align_cross: CENTER, pad_column: "${bcg}" }
+                        widgets:
+                          - obj: { id: bcell0, styles: st_bcell, clickable: false }
+                          - obj: { id: bcell1, styles: st_bcell, clickable: false }
+                          - obj: { id: bcell2, styles: st_bcell, clickable: false }
+                          - obj: { id: bcell3, styles: st_bcell, clickable: false }
+                    - obj: { width: "${tip_w}", height: "${tip_h}", radius: 2, bg_color: "0x${c_green}", bg_opa: COVER, border_width: 0, pad_all: 0, clickable: false }
               # One polyline per direction (retracing the head is invisible), so turning
-              # the arrow is a show / hide instead of moving points around.
-              - line: { id: arrow_in,  x: 87, y: 17, points: [[10, 0], [0, 9], [10, 18], [0, 9], [27, 9]], line_width: 5, line_rounded: true, line_color: "0x${c_green}", hidden: true }
-              - line: { id: arrow_out, x: 87, y: 17, points: [[17, 0], [27, 9], [17, 18], [27, 9], [0, 9]], line_width: 5, line_rounded: true, line_color: "0x${c_blue}", hidden: true }
-              - label: { id: v_dir, x: 122, y: 16, width: 187, text: "NO LIVE DATA", text_font: inter_18, text_color: "0x${c_red}" }
-              - obj: { styles: st_rule, x: 311, y: 10, width: 1, height: 35, clickable: false }
-              - label: { x: 323, y: 5, text: "STATUS", text_font: inter_14, text_color: "0x${c_muted}" }
-              - label: { id: v_status, x: 323, y: 25, width: 125, text: "WAITING", text_font: inter_16, text_color: "0x${c_green}" }
-        # ---- SOC arc with pack voltage ----
+              # the arrow is a show / hide instead of moving points around. A hidden one
+              # takes no room in the row.
+              - line: { id: arrow_in,  width: "${arr_w}", height: "${arr_h}", points: "${arr_in}",  line_width: "${arr_lw}", line_rounded: true, line_color: "0x${c_green}", hidden: true }
+              - line: { id: arrow_out, width: "${arr_w}", height: "${arr_h}", points: "${arr_out}", line_width: "${arr_lw}", line_rounded: true, line_color: "0x${c_blue}", hidden: true }
+              - label: { id: v_dir, flex_grow: 1, long_mode: CLIP, text: "NO LIVE DATA", text_font: f_val, text_color: "0x${c_red}" }
+              - obj: { styles: st_rule, width: 1, height: "${rule_h}", clickable: false }
+              - obj:
+                  styles: st_bare
+                  scrollable: false
+                  clickable: false
+                  width: ${hdr_st_w}
+                  height: SIZE_CONTENT
+                  layout: { type: FLEX, flex_flow: COLUMN, pad_row: 0 }
+                  widgets:
+                    - label: { text: "STATUS", text_font: f_cap, text_color: "0x${c_muted}" }
+                    - label: { id: v_status, width: 100%, long_mode: CLIP, text: "WAITING", text_font: f_txt, text_color: "0x${c_green}" }
+        # ---- the readings: SOC arc | POWER and CURRENT ----
         - obj:
-            styles: st_card
+            id: main_area
+            styles: st_bare
             scrollable: false
-            x: 10
-            y: 72
-            width: 268
-            height: 284
+            width: 100%
+            flex_grow: 1
+            layout: { type: FLEX, flex_flow: ROW, pad_column: "${g}" }
             widgets:
-              - arc:
-                  id: soc_arc
-                  x: 10
-                  y: 8
-                  width: 248
-                  height: 248
-                  start_angle: 135
-                  end_angle: 45
-                  rotation: 0
-                  min_value: 0
-                  max_value: 100
-                  value: 0
-                  adjustable: false
-                  bg_opa: TRANSP
-                  border_width: 0
-                  pad_all: 0
-                  arc_width: 22
-                  arc_color: "0x${c_arc_bg}"
-                  arc_rounded: true
-                  indicator:
-                    arc_width: 22
-                    arc_color: "0x${c_green}"
-                    arc_rounded: true
-              - label: { id: v_soc, x: 15, y: 84, width: 238, text: "--%", text_align: CENTER, text_font: inter_d48, text_color: "0x${c_red}" }
-              - obj: { styles: st_rule, x: 54, y: 153, width: 160, height: 1 }
-              - label: { id: v_volt, x: 15, y: 164, width: 238, text: "--.- V", text_align: CENTER, text_font: inter_d32, text_color: "0x${c_red}" }
-        # ---- POWER / CURRENT ----
-        - obj:
-            styles: st_card
-            scrollable: false
-            x: 288
-            y: 72
-            width: 182
-            height: 135
-            radius: 10
-            widgets:
-              - label: { x: 10, y: 5, text: "POWER", text_font: inter_14 }
-              - label: { id: v_pow, x: 0, y: 44, width: 182, text: "-- W", text_align: CENTER, long_mode: CLIP, text_font: inter_d48, text_color: "0x${c_red}" }
-        - obj:
-            styles: st_card
-            scrollable: false
-            x: 288
-            y: 217
-            width: 182
-            height: 139
-            radius: 10
-            widgets:
-              - label: { x: 10, y: 5, text: "CURRENT", text_font: inter_14 }
-              - label: { id: v_cur, x: 0, y: 46, width: 182, text: "-- A", text_align: CENTER, long_mode: CLIP, text_font: inter_d48, text_color: "0x${c_red}" }
+              - obj:
+                  id: soc_card
+                  styles: st_card
+                  scrollable: false
+                  flex_grow: ${soc_grow}
+                  height: 100%
+                  widgets:
+                    - arc:
+                        id: soc_arc
+                        align: CENTER
+                        width: 50%                 # fit_arc makes it a circle that fills the card
+                        height: 50%
+                        start_angle: 135
+                        end_angle: 45
+                        rotation: 0
+                        min_value: 0
+                        max_value: 100
+                        value: 0
+                        adjustable: false
+                        bg_opa: TRANSP
+                        border_width: 0
+                        pad_all: 0
+                        arc_width: ${arc_lw}
+                        arc_color: "0x${c_arc_bg}"
+                        arc_rounded: true
+                        indicator:
+                          arc_width: ${arc_lw}
+                          arc_color: "0x${c_green}"
+                          arc_rounded: true
+                    - obj:                 # SOC, a rule, the pack voltage: centred in the ring
+                        styles: st_bare
+                        align: CENTER
+                        scrollable: false
+                        clickable: false
+                        width: SIZE_CONTENT
+                        height: SIZE_CONTENT
+                        layout: { type: FLEX, flex_flow: COLUMN, flex_align_cross: CENTER, pad_row: "${soc_gap}" }
+                        widgets:
+                          - label: { id: v_soc, text: "--%", text_font: f_soc, text_color: "0x${c_red}" }
+                          - obj: { styles: st_rule, width: "${soc_rule_w}", height: 1 }
+                          - label: { id: v_volt, text: "--.- V", text_font: f_volt, text_color: "0x${c_red}" }
+              - obj:
+                  styles: st_bare
+                  scrollable: false
+                  flex_grow: ${pc_grow}
+                  height: 100%
+                  layout: { type: FLEX, flex_flow: COLUMN, pad_row: "${g}" }
+                  widgets:
+                    - obj:
+                        id: pow_card
+                        styles: st_card
+                        scrollable: false
+                        radius: ${rad_s}
+                        width: 100%
+                        flex_grow: 1
+                        widgets:
+                          - label: { align: TOP_LEFT, x: "${pad}", y: "${cap_y}", text: "POWER", text_font: f_cap }
+                          - label: { id: v_pow, align: CENTER, y: "${big_dy}", width: 100%, text: "-- W", text_align: CENTER, long_mode: CLIP, text_font: f_big, text_color: "0x${c_red}" }
+                    - obj:
+                        id: cur_card
+                        styles: st_card
+                        scrollable: false
+                        radius: ${rad_s}
+                        width: 100%
+                        flex_grow: 1
+                        widgets:
+                          - label: { align: TOP_LEFT, x: "${pad}", y: "${cap_y}", text: "CURRENT", text_font: f_cap }
+                          - label: { id: v_cur, align: CENTER, y: "${big_dy}", width: 100%, text: "-- A", text_align: CENTER, long_mode: CLIP, text_font: f_big, text_color: "0x${c_red}" }
         # ---- cell max / min | delta | temperature ----
         # The readings need no headings (reference v15.8), which leaves room for large
         # figures. MAX and MIN open the cell monitor on that very cell.
         # With several packs the first two columns show the installation's scaled
         # energy and its power limits instead (render_link swaps the two sets).
+        # A card with three columns: two thin rules between them.
         - obj:
             id: main_bottom
             styles: st_card
             scrollable: false
-            x: 10
-            y: 365
-            width: 460
-            height: 74
+            width: 100%
+            height: ${bot_h}
             widgets:
-              - label:
-                  id: v_cmax
-                  x: 4
-                  y: 7
-                  width: 142
-                  text: "MAX -- V"
-                  text_align: CENTER
-                  text_font: montserrat_20
-                  text_color: "0x${c_muted}"
-                  on_click:
-                    - script.execute: { id: focus_extreme, want_max: true }
-              - label:
-                  id: v_cmin
-                  x: 4
-                  y: 38
-                  width: 142
-                  text: "MIN  -- V"
-                  text_align: CENTER
-                  text_font: montserrat_20
-                  text_color: "0x${c_muted}"
-                  on_click:
-                    - script.execute: { id: focus_extreme, want_max: false }
-              - label: { id: v_mrem, x: 4, y: 9, width: 142, text: "rem. -- kWh", text_align: CENTER, text_font: inter_18, text_color: "0x${c_blue}", hidden: true }
-              - label: { id: v_mtot, x: 4, y: 39, width: 142, text: "tot. -- kWh", text_align: CENTER, text_font: inter_18, text_color: "0x${c_blue}", hidden: true }
-              - label: { id: v_mdis, x: 150, y: 9, width: 160, text: "max dis -- kW", text_align: CENTER, text_font: inter_18, text_color: "0x${c_blue}", hidden: true }
-              - label: { id: v_mchg, x: 150, y: 39, width: 160, text: "max chg -- kW", text_align: CENTER, text_font: inter_18, text_color: "0x${c_green}", hidden: true }
-              - obj: { id: sep_a, styles: st_rule, x: 150, y: 12, width: 1, height: 50 }
-              - label: { id: v_delta, x: 150, y: 18, width: 160, text: "Δ -- mV", text_align: CENTER, text_font: inter_d32, text_color: "0x${c_muted}" }
-              - obj: { id: sep_b, styles: st_rule, x: 310, y: 12, width: 1, height: 50 }
-              - label: { id: v_temp, x: 310, y: 14, width: 150, text: "--.-°C", text_align: CENTER, text_font: montserrat_40, text_color: "0x${c_blue}" }
-              - label: { id: v_offline, x: 10, y: 8, width: 440, text: "", text_align: CENTER, text_font: inter_16, text_color: "0x${c_red}", hidden: true }
+              - obj:
+                  styles: st_bare
+                  scrollable: false
+                  clickable: false
+                  width: 100%
+                  height: 100%
+                  layout:
+                    type: GRID
+                    grid_columns: ["FR(${bot_c1})", 1, "FR(${bot_c2})", 1, "FR(${bot_c3})"]
+                    grid_rows: [FR(1)]
+                  widgets:
+                    - obj:                 # column 1: cell max / min, or energy remaining / total
+                        styles: st_bare
+                        scrollable: false
+                        clickable: false
+                        grid_cell_column_pos: 0
+                        grid_cell_row_pos: 0
+                        grid_cell_x_align: STRETCH
+                        grid_cell_y_align: STRETCH
+                        layout: { type: FLEX, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER, pad_row: "${bot_gap}" }
+                        widgets:
+                          - label: { id: v_cmax, text: "MAX -- V", text_font: m_xl, text_color: "0x${c_muted}", on_click: [ script.execute: { id: focus_extreme, want_max: true } ] }
+                          - label: { id: v_cmin, text: "MIN  -- V", text_font: m_xl, text_color: "0x${c_muted}", on_click: [ script.execute: { id: focus_extreme, want_max: false } ] }
+                          - label: { id: v_mrem, text: "rem. -- kWh", text_font: f_val, text_color: "0x${c_blue}", hidden: true }
+                          - label: { id: v_mtot, text: "tot. -- kWh", text_font: f_val, text_color: "0x${c_blue}", hidden: true }
+                    - obj: { id: sep_a, styles: st_rule, grid_cell_column_pos: 1, grid_cell_row_pos: 0, grid_cell_x_align: STRETCH, grid_cell_y_align: CENTER, height: 72% }
+                    - obj:                 # column 2: cell delta, or the power limits
+                        styles: st_bare
+                        scrollable: false
+                        clickable: false
+                        grid_cell_column_pos: 2
+                        grid_cell_row_pos: 0
+                        grid_cell_x_align: STRETCH
+                        grid_cell_y_align: STRETCH
+                        layout: { type: FLEX, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER, pad_row: "${bot_gap}" }
+                        widgets:
+                          - label: { id: v_delta, text: "Δ -- mV", text_font: f_ttl, text_color: "0x${c_muted}" }
+                          - label: { id: v_mdis, text: "max dis -- kW", text_font: f_val, text_color: "0x${c_blue}", hidden: true }
+                          - label: { id: v_mchg, text: "max chg -- kW", text_font: f_val, text_color: "0x${c_green}", hidden: true }
+                    - obj: { id: sep_b, styles: st_rule, grid_cell_column_pos: 3, grid_cell_row_pos: 0, grid_cell_x_align: STRETCH, grid_cell_y_align: CENTER, height: 72% }
+                    - obj:                 # column 3: the hottest cell
+                        styles: st_bare
+                        scrollable: false
+                        clickable: false
+                        grid_cell_column_pos: 4
+                        grid_cell_row_pos: 0
+                        grid_cell_x_align: STRETCH
+                        grid_cell_y_align: STRETCH
+                        layout: { type: FLEX, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER }
+                        widgets:
+                          - label: { id: v_temp, text: "--.-°C", text_font: m_temp, text_color: "0x${c_blue}" }
+              - label: { id: v_offline, align: CENTER, width: 96%, text: "", text_align: CENTER, text_font: f_txt, text_color: "0x${c_red}", hidden: true }
         # ---- event notification ----
         - obj:
             id: warn_bar
             styles: st_card
             scrollable: false
-            x: 10
-            y: 418
-            width: 460
-            height: 34
-            radius: 9
+            width: 100%
+            height: ${warn_h}
+            radius: ${rad_s}
             bg_color: 0x241700
             border_color: "0x${c_amber}"
             hidden: true
             on_click:
               - lvgl.page.show: pg_events
             widgets:
-              - label: { id: v_warn, x: 8, y: 7, width: 444, text: "", text_align: CENTER, text_font: inter_16, text_color: "0x${c_amber}" }
+              - label: { id: v_warn, align: CENTER, width: 98%, text: "", text_align: CENTER, long_mode: CLIP, text_font: f_txt, text_color: "0x${c_amber}" }
 
     # =========================================================================
     # BATTERIES - the reference's multi-pack dashboard. Skipped with one pack.
+    # The cards share the height, so two or three packs need no arithmetic here.
     # =========================================================================
     - id: pg_batt
       styles: st_page
+      scrollable: false
       skip: true
+      layout: *pg_column
       on_load:
         - script.execute: { id: page_loaded, page: 1 }
       on_swipe_left: *swipe_next
@@ -2153,68 +2268,62 @@ lvgl:
         - obj:
             styles: st_title
             scrollable: false
-            x: 10
-            y: 8
-            width: 460
-            height: 54
+            width: 100%
+            height: ${th}
             widgets:
-              - label: { x: 0, y: 8, width: 460, text: "BATTERIES", text_align: CENTER, text_font: inter_d32 }
-              - label: { id: v_batt_badge, x: 340, y: 18, width: 110, text: "", text_align: RIGHT, text_font: inter_14 }
+              - label: { align: CENTER, text: "BATTERIES", text_font: f_ttl }
+              - label: { id: v_batt_badge, align: RIGHT_MID, x: "${ -pad }", text: "", text_align: RIGHT, text_font: f_cap }
         - obj:
             id: bc_1
             styles: st_card
             scrollable: false
-            x: 10
-            y: 68
-            width: 460
-            height: 116
-            radius: 14
+            width: 100%
+            flex_grow: 1
+            radius: ${rad}
             border_color: "0x${c_green}"
             on_click:
               - script.execute: { id: select_pack, pack: 0 }
               - lvgl.page.show: pg_cells
             widgets:
-              - label: { x: 15, y: 9, text: "BATTERY 1", text_font: montserrat_18, text_color: "0x${c_green}" }
-              - label: { id: bt_1, x: 15, y: 38, width: 436, text: "WAITING FOR DATA", text_font: inter_14, text_line_space: 6, text_color: "0x${c_muted}" }
+              - label: { align: "${bt_align}", x: "${bt_tx}", y: "${bt_ty}", text: "BATTERY 1", text_font: m_l, text_color: "0x${c_green}" }
+              - label: { id: bt_1, align: TOP_LEFT, x: "${bt_x}", y: "${bt_y}", width: "${bt_w}", text: "WAITING FOR DATA", text_font: f_cap, text_line_space: "${bt_ls}", text_color: "0x${c_muted}" }
         - obj:
             id: bc_2
             styles: st_card
             scrollable: false
-            x: 10
-            y: 192
-            width: 460
-            height: 116
-            radius: 14
+            width: 100%
+            flex_grow: 1
+            radius: ${rad}
             border_color: "0x${c_blue}"
             on_click:
               - script.execute: { id: select_pack, pack: 1 }
               - lvgl.page.show: pg_cells
             widgets:
-              - label: { x: 15, y: 9, text: "BATTERY 2", text_font: montserrat_18, text_color: "0x${c_blue}" }
-              - label: { id: bt_2, x: 15, y: 38, width: 436, text: "WAITING FOR DATA", text_font: inter_14, text_line_space: 6, text_color: "0x${c_muted}" }
+              - label: { align: "${bt_align}", x: "${bt_tx}", y: "${bt_ty}", text: "BATTERY 2", text_font: m_l, text_color: "0x${c_blue}" }
+              - label: { id: bt_2, align: TOP_LEFT, x: "${bt_x}", y: "${bt_y}", width: "${bt_w}", text: "WAITING FOR DATA", text_font: f_cap, text_line_space: "${bt_ls}", text_color: "0x${c_muted}" }
         - obj:
             id: bc_3
             styles: st_card
             scrollable: false
-            x: 10
-            y: 316
-            width: 460
-            height: 116
-            radius: 14
+            width: 100%
+            flex_grow: 1
+            radius: ${rad}
             border_color: "0x${c_blue}"
             on_click:
               - script.execute: { id: select_pack, pack: 2 }
               - lvgl.page.show: pg_cells
             widgets:
-              - label: { x: 15, y: 9, text: "BATTERY 3", text_font: montserrat_18, text_color: "0x${c_blue}" }
-              - label: { id: bt_3, x: 15, y: 38, width: 436, text: "WAITING FOR DATA", text_font: inter_14, text_line_space: 6, text_color: "0x${c_muted}" }
-        - label: { x: 0, y: 440, width: 480, text: "TAP A BATTERY FOR ITS CELLS   |   SWIPE FOR MORE", text_align: CENTER, text_font: montserrat_12, text_color: "0x${c_muted}" }
+              - label: { align: "${bt_align}", x: "${bt_tx}", y: "${bt_ty}", text: "BATTERY 3", text_font: m_l, text_color: "0x${c_blue}" }
+              - label: { id: bt_3, align: TOP_LEFT, x: "${bt_x}", y: "${bt_y}", width: "${bt_w}", text: "WAITING FOR DATA", text_font: f_cap, text_line_space: "${bt_ls}", text_color: "0x${c_muted}" }
+        - label: { width: 100%, text: "TAP A BATTERY FOR ITS CELLS   |   SWIPE FOR MORE", text_align: CENTER, text_font: m_hint, text_color: "0x${c_muted}" }
 
     # =========================================================================
     # CELL MONITOR - uBuildCells()
     # =========================================================================
     - id: pg_cells
       styles: st_page
+      scrollable: false
+      layout: *pg_column
       on_load:
         - script.execute: { id: page_loaded, page: 2 }
       on_swipe_left: *swipe_next
@@ -2223,74 +2332,86 @@ lvgl:
         - obj:
             styles: st_title
             scrollable: false
-            x: 10
-            y: 8
-            width: 460
-            height: 54
+            width: 100%
+            height: ${th}
             on_click:
               - script.execute: next_pack
             widgets:
-              - label: { x: 0, y: 8, width: 460, text: "CELL MONITOR", text_align: CENTER, text_font: inter_d32 }
-              - label: { id: v_cells_badge, x: 340, y: 18, width: 110, text: "", text_align: RIGHT, text_font: inter_14 }
+              - label: { align: CENTER, text: "CELL MONITOR", text_font: f_ttl }
+              - label: { id: v_cells_badge, align: RIGHT_MID, x: "${ -pad }", text: "", text_align: RIGHT, text_font: f_cap }
         - obj:
-            styles: st_card
+            styles: st_bare
             scrollable: false
-            x: 10
-            y: 72
-            width: 108
-            height: 74
-            radius: 10
+            width: 100%
+            height: ${st_h}
+            layout:
+              type: GRID
+              grid_columns: ["FR(1)", "FR(1)", "FR(1)", "FR(1)"]
+              grid_rows: ["FR(1)"]
+              pad_column: ${g}
             widgets:
-              - label: { x: 10, y: 5, text: "MIN", text_font: inter_14 }
-              - label: { id: c_min_v, x: 0, y: 24, width: 108, text: "--\nCELL --", text_align: CENTER, text_font: inter_18, text_color: "0x${c_blue}" }
+              - obj:
+                  styles: st_card
+                  scrollable: false
+                  radius: ${rad_s}
+                  grid_cell_column_pos: 0
+                  grid_cell_row_pos: 0
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
+                  widgets:
+                    - label: { align: TOP_LEFT, x: "${pad}", y: "${cap_y}", text: "MIN", text_font: f_cap }
+                    - label: { id: c_min_v, align: BOTTOM_MID, y: "${ -st_vy }", text: "--\nCELL --", text_align: CENTER, text_font: f_val, text_color: "0x${c_blue}" }
+              - obj:
+                  styles: st_card
+                  scrollable: false
+                  radius: ${rad_s}
+                  grid_cell_column_pos: 1
+                  grid_cell_row_pos: 0
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
+                  widgets:
+                    - label: { align: TOP_LEFT, x: "${pad}", y: "${cap_y}", text: "MAX", text_font: f_cap }
+                    - label: { id: c_max_v, align: BOTTOM_MID, y: "${ -st_vy }", text: "--\nCELL --", text_align: CENTER, text_font: f_val, text_color: "0x${c_green}" }
+              - obj:
+                  styles: st_card
+                  scrollable: false
+                  radius: ${rad_s}
+                  grid_cell_column_pos: 2
+                  grid_cell_row_pos: 0
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
+                  widgets:
+                    - label: { align: TOP_LEFT, x: "${pad}", y: "${cap_y}", text: "CELL DELTA", text_font: f_cap }
+                    - label: { id: c_dlt_v, align: BOTTOM_MID, y: "${ -st_vy1 }", text: "Δ -- mV", text_align: CENTER, text_font: f_val, text_color: "0x${c_green}" }
+              - obj:
+                  styles: st_card
+                  scrollable: false
+                  radius: ${rad_s}
+                  grid_cell_column_pos: 3
+                  grid_cell_row_pos: 0
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
+                  widgets:
+                    - label: { align: TOP_LEFT, x: "${pad}", y: "${cap_y}", text: "TEMP", text_font: f_cap }
+                    - label: { id: c_tmp_v, align: BOTTOM_MID, y: "${ -st_vy }", text: "--\n--", text_align: CENTER, text_font: f_txt, text_line_space: 2, text_color: "0x${c_blue}" }
+        # The tags over the lowest and the highest bar. render_cells places them.
         - obj:
-            styles: st_card
+            styles: st_bare
             scrollable: false
-            x: 127
-            y: 72
-            width: 108
-            height: 74
-            radius: 10
+            width: 100%
+            height: ${tag_h}
             widgets:
-              - label: { x: 10, y: 5, text: "MAX", text_font: inter_14 }
-              - label: { id: c_max_v, x: 0, y: 24, width: 108, text: "--\nCELL --", text_align: CENTER, text_font: inter_18, text_color: "0x${c_green}" }
-        - obj:
-            styles: st_card
-            scrollable: false
-            x: 244
-            y: 72
-            width: 108
-            height: 74
-            radius: 10
-            widgets:
-              - label: { x: 10, y: 5, text: "CELL DELTA", text_font: inter_14 }
-              - label: { id: c_dlt_v, x: 0, y: 29, width: 108, text: "Δ -- mV", text_align: CENTER, text_font: inter_18, text_color: "0x${c_green}" }
-        - obj:
-            styles: st_card
-            scrollable: false
-            x: 361
-            y: 72
-            width: 109
-            height: 74
-            radius: 10
-            widgets:
-              - label: { x: 10, y: 5, text: "TEMP", text_font: inter_14 }
-              - label: { id: c_tmp_v, x: 0, y: 22, width: 109, text: "--\n--", text_align: CENTER, text_font: inter_16, text_line_space: 2, text_color: "0x${c_blue}" }
-        - label: { id: v_min_tag, x: 0, y: 151, text: "", text_font: inter_14, text_color: "0x${c_blue}", hidden: true }
-        - label: { id: v_max_tag, x: 0, y: 151, text: "", text_font: inter_14, text_color: "0x${c_green}", hidden: true }
-        # The chart: one widget whose draw event paints every bar from cell_mv. Bars stand
-        # on y = 420 and run 75 px (lowest cell) to 175 px (highest) tall, as in the
-        # reference; the scale is relative, so the MIN / MAX cards carry the figures.
+              - label: { id: v_min_tag, y: 0, text: "", text_font: f_cap, text_color: "0x${c_blue}", hidden: true }
+              - label: { id: v_max_tag, y: 0, text: "", text_font: f_cap, text_color: "0x${c_green}", hidden: true }
+        # The chart: one widget whose draw event paints every bar from cell_mv. The bars
+        # stand on the bottom edge and run 30 % (lowest cell) to 70 % (highest) of the
+        # height, as in the reference; the scale is relative, so the MIN / MAX cards
+        # carry the figures.
         - obj:
             id: cell_plot
-            x: 0
-            y: 170
-            width: 480
-            height: 250
-            bg_opa: TRANSP
-            border_width: 0
-            radius: 0
-            pad_all: 0
+            styles: st_bare
+            width: 100%
+            flex_grow: 1
             on_draw_main_end:
               - lambda: |-
                   const int b = id(sel_pack), n = id(cell_n)[b];
@@ -2299,13 +2420,14 @@ lvgl:
                   lv_layer_t* layer = lv_event_get_layer(event);
                   lv_area_t a;
                   lv_obj_get_coords(id(cell_plot), &a);
+                  const int pw = lv_area_get_width(&a), ph = lv_area_get_height(&a);
                   const int base = b * 192;
                   const int lo = id(cell_mv)[base + ilo];
                   int span = id(cell_mv)[base + ihi] - lo;
                   if (span < 20) span = 20;
-                  int slot = 480 / n; if (slot < 1) slot = 1;
-                  int bw = slot >= 2 ? slot - 1 : 1; if (bw > 18) bw = 18;
-                  const int x0 = (480 - slot * n) / 2 + (slot - bw) / 2;
+                  int slot = pw / n; if (slot < 1) slot = 1;
+                  int bw = slot >= 2 ? slot - 1 : 1; if (bw > ${bar_wmax}) bw = ${bar_wmax};
+                  const int x0 = (pw - slot * n) / 2 + (slot - bw) / 2;
                   const int fault = id(c_fault), foc = id(cell_focus);
                   lv_draw_rect_dsc_t d;
                   lv_draw_rect_dsc_init(&d);
@@ -2315,8 +2437,8 @@ lvgl:
                   auto bar = [&](int k, int grow) {
                     const int v = id(cell_mv)[base + k];
                     if (v < 1000) return;
-                    int ht = 75 + (v - lo) * 100 / span;
-                    ht = ht < 65 ? 65 : (ht > 175 ? 175 : ht);
+                    int ht = ph * 30 / 100 + (v - lo) * (ph * 40 / 100) / span;
+                    ht = ht < ph * 26 / 100 ? ph * 26 / 100 : (ht > ph * 70 / 100 ? ph * 70 / 100 : ht);
                     uint32_t c = 0x${c_bar};
                     if (k == ilo)      c = (fault & 1) ? 0x${c_red} : 0x${c_blue};
                     else if (k == ihi) c = (fault & 2) ? 0x${c_red} : 0x${c_green};
@@ -2328,38 +2450,49 @@ lvgl:
                       lv_draw_rect_dsc_t cap = d;
                       cap.bg_color = lv_color_hex(0x${c_soft_amber});
                       cap.border_width = 0;
-                      lv_area_t rc = {r.x1, r.y1, r.x2, r.y1 + 3};
+                      lv_area_t rc = {r.x1, r.y1, r.x2, r.y1 + ${bar_cap}};
                       lv_draw_rect(layer, &cap, &rc);
                     }
                   };
                   for (int k = 0; k < n; k++) if (k != foc) bar(k, 0);
                   // The selected cell last, on top: widened and outlined in white.
                   if (foc >= 0 && foc < n) {
-                    d.border_width = 2;
+                    d.border_width = ${bar_out};
                     d.border_color = lv_color_hex(0xFFFFFF);
                     d.border_opa = LV_OPA_COVER;
-                    bar(foc, 2);
+                    bar(foc, ${bar_out});
                   }
             # Tap or drag across the bars to read single cells.
             on_press: &cell_pick
               - lambda: |-
                   const int b = id(sel_pack), n = id(cell_n)[b];
                   if (n <= 0) return;
-                  int slot = 480 / n; if (slot < 1) slot = 1;
-                  int k = (point.x - (480 - slot * n) / 2) / slot;
+                  lv_area_t a;
+                  lv_obj_get_coords(id(cell_plot), &a);
+                  const int pw = lv_area_get_width(&a);
+                  int slot = pw / n; if (slot < 1) slot = 1;
+                  int k = (point.x - a.x1 - (pw - slot * n) / 2) / slot;
                   k = k < 0 ? 0 : (k >= n ? n - 1 : k);
                   if (k == id(cell_focus) && id(cell_focus_kind) == 0) return;
                   id(cell_focus) = k;
                   id(cell_focus_kind) = 0;
                   id(render_cells).execute();
             on_pressing: *cell_pick
-        - label: { id: v_focus, x: 0, y: 432, width: 480, text: "", text_align: CENTER, text_font: inter_14, hidden: true }
+        - obj:
+            styles: st_bare
+            scrollable: false
+            width: 100%
+            height: ${foc_h}
+            widgets:
+              - label: { id: v_focus, align: CENTER, width: 100%, text: "", text_align: CENTER, text_font: f_cap, hidden: true }
 
     # =========================================================================
     # EVENTS - uBuildEvents()
     # =========================================================================
     - id: pg_events
       styles: st_page
+      scrollable: false
+      layout: *pg_column
       on_load:
         - script.execute: { id: page_loaded, page: 3 }
       on_swipe_left: *swipe_next
@@ -2368,14 +2501,12 @@ lvgl:
         - obj:
             styles: st_title
             scrollable: false
-            x: 10
-            y: 8
-            width: 460
-            height: 54
+            width: 100%
+            height: ${th}
             widgets:
-              - label: { x: 0, y: 8, width: 460, text: "EVENTS", text_align: CENTER, text_font: inter_d32 }
-              - label: { id: v_ev_badge, x: 340, y: 18, width: 110, text: "", text_align: RIGHT, text_font: inter_14, text_color: "0x${c_amber}" }
-        - label: { id: v_ev_count, x: 20, y: 70, text: "WAITING FOR THE EMULATOR", text_font: montserrat_14, text_color: "0x${c_muted}" }
+              - label: { align: CENTER, text: "EVENTS", text_font: f_ttl }
+              - label: { id: v_ev_badge, align: RIGHT_MID, x: "${ -pad }", text: "", text_align: RIGHT, text_font: f_cap, text_color: "0x${c_amber}" }
+        - label: { id: v_ev_count, width: 100%, pad_left: "${pad}", text: "WAITING FOR THE EMULATOR", text_font: m_s, text_color: "0x${c_muted}" }
         # A card list: the cards are built at runtime by render_events. The list owns the
         # scrolling; ESP-NOW is read-only, so there are no command buttons below it.
         # (The hidden spacer is there because ESPHome only builds LVGL's flex layout
@@ -2383,28 +2514,35 @@ lvgl:
         - obj:
             id: ev_list
             styles: st_card
-            x: 10
-            y: 96
-            width: 460
-            height: 345
-            radius: 10
-            pad_all: 8
+            width: 100%
+            flex_grow: 1
+            radius: ${rad_s}
+            pad_all: ${ev_pad}
             scroll_dir: VER
             scrollbar_mode: AUTO
             layout:
               type: FLEX
               flex_flow: COLUMN
-              pad_row: 8
+              pad_row: ${ev_gap}
             widgets:
               - obj: { width: 0, height: 0, hidden: true }
-        - label: { id: v_ev_empty, x: 0, y: 238, width: 480, text: "NO EVENTS", text_align: CENTER, text_font: montserrat_20, text_color: "0x${c_green}", hidden: true }
-        - label: { id: v_ev_more, x: 428, y: 443, text: "MORE", text_font: montserrat_12, text_color: "0x${c_green}", hidden: true }
+        - label: { id: v_ev_empty, floating: true, align: CENTER, width: 100%, text: "NO EVENTS", text_align: CENTER, text_font: m_xl, text_color: "0x${c_green}", hidden: true }
+        - obj:
+            styles: st_bare
+            scrollable: false
+            width: 100%
+            height: ${foc_h}
+            widgets:
+              - label: { id: v_ev_more, align: RIGHT_MID, x: "${ -pad }", text: "MORE", text_font: m_hint, text_color: "0x${c_green}", hidden: true }
 
     # =========================================================================
     # BATTERY INFO - uBuildInfo(), for the selected pack
+    # The cards share the height by weight: 12 / 9 / 9 / 9 / 18 / 15.
     # =========================================================================
     - id: pg_info
       styles: st_page
+      scrollable: false
+      layout: *pg_column
       on_load:
         - script.execute: { id: page_loaded, page: 4 }
       on_swipe_left: *swipe_next
@@ -2413,85 +2551,95 @@ lvgl:
         - obj:
             styles: st_title
             scrollable: false
-            x: 10
-            y: 8
-            width: 460
-            height: 54
+            width: 100%
+            height: ${th}
             on_click:
               - script.execute: next_pack
             widgets:
-              - label: { x: 0, y: 8, width: 460, text: "BATTERY INFO", text_align: CENTER, text_font: inter_d32 }
-              - label: { id: v_info_badge, x: 340, y: 18, width: 110, text: "", text_align: RIGHT, text_font: inter_14 }
+              - label: { align: CENTER, text: "BATTERY INFO", text_font: f_ttl }
+              - label: { id: v_info_badge, align: RIGHT_MID, x: "${ -pad }", text: "", text_align: RIGHT, text_font: f_cap }
         - obj:
             styles: st_card
             scrollable: false
-            x: 10
-            y: 70
-            width: 460
-            height: 58
+            width: 100%
+            flex_grow: 12
             widgets:
-              - label: { x: 18, y: 19, text: "CONTACTORS", text_font: montserrat_16 }
-              - label: { id: v_cont, x: 180, y: 7, width: 255, text: "--", text_align: CENTER, text_font: inter_d32, text_color: "0x${c_muted}" }
+              - label: { align: LEFT_MID, x: "${ 2 * pad }", text: "CONTACTORS", text_font: m_m }
+              - label: { id: v_cont, align: RIGHT_MID, x: "${ -pad }", width: 55%, text: "--", text_align: CENTER, text_font: f_ttl, text_color: "0x${c_muted}" }
         - obj:
             styles: st_card
             scrollable: false
-            x: 10
-            y: 134
-            width: 460
-            height: 44
-            radius: 9
+            width: 100%
+            flex_grow: 8
+            radius: ${rad_s}
             widgets:
-              - label: { id: v_bms_row, x: 10, y: 11, width: 440, text: "BMS STATUS  --", recolor: true, text_align: CENTER, text_font: montserrat_18 }
+              - label: { id: v_bms_row, align: CENTER, width: 96%, text: "BMS STATUS  --", recolor: true, text_align: CENTER, text_font: m_l }
         - obj:
             styles: st_card
             scrollable: false
-            x: 10
-            y: 184
-            width: 460
-            height: 44
-            radius: 9
+            width: 100%
+            flex_grow: 8
+            radius: ${rad_s}
             widgets:
-              - label: { id: v_links, x: 10, y: 11, width: 440, text: "BATTERY CAN  --   |   INVERTER CAN  --", recolor: true, text_align: CENTER, text_font: montserrat_18 }
+              - label: { id: v_links, align: CENTER, width: 96%, text: "BATTERY CAN  --   |   INVERTER CAN  --", recolor: true, text_align: CENTER, text_font: m_l }
         - obj:
             styles: st_card
             scrollable: false
-            x: 10
-            y: 234
-            width: 460
-            height: 44
-            radius: 9
+            width: 100%
+            flex_grow: 8
+            radius: ${rad_s}
             widgets:
-              - label: { id: v_power_row, x: 10, y: 11, width: 440, text: "DC BUS  --   |   E-STOP  --", recolor: true, text_align: CENTER, text_font: montserrat_18 }
+              - label: { id: v_power_row, align: CENTER, width: 96%, text: "DC BUS  --   |   E-STOP  --", recolor: true, text_align: CENTER, text_font: m_l }
         - obj:
             styles: st_card
             scrollable: false
-            x: 10
-            y: 284
-            width: 460
-            height: 85
-            radius: 10
+            width: 100%
+            flex_grow: 20
+            radius: ${rad_s}
             widgets:
-              - label: { id: v_health, x: 10, y: 6, width: 440, text: "SOH --        REAL SOC --", text_align: CENTER, text_font: montserrat_16 }
-              - label: { id: v_chg_lim, x: 12, y: 31, width: 436, text: "CHARGE LIMIT       -- kW  |  -- A", text_align: CENTER, text_font: montserrat_18, text_color: "0x${c_green}" }
-              - label: { id: v_dis_lim, x: 12, y: 57, width: 436, text: "DISCHARGE LIMIT    -- kW  |  -- A", text_align: CENTER, text_font: montserrat_18, text_color: "0x${c_blue}" }
+              - obj:
+                  styles: st_bare
+                  align: CENTER
+                  scrollable: false
+                  clickable: false
+                  width: 96%
+                  height: SIZE_CONTENT
+                  layout: { type: FLEX, flex_flow: COLUMN, flex_align_cross: CENTER, pad_row: "${info_gap}" }
+                  widgets:
+                    - label: { id: v_health, width: 100%, text: "SOH --        REAL SOC --", text_align: CENTER, text_font: m_m }
+                    - label: { id: v_chg_lim, width: 100%, text: "CHARGE LIMIT       -- kW  |  -- A", text_align: CENTER, text_font: m_l, text_color: "0x${c_green}" }
+                    - label: { id: v_dis_lim, width: 100%, text: "DISCHARGE LIMIT    -- kW  |  -- A", text_align: CENTER, text_font: m_l, text_color: "0x${c_blue}" }
         - obj:
             styles: st_card
             scrollable: false
-            x: 10
-            y: 375
-            width: 460
-            height: 68
-            radius: 10
+            width: 100%
+            flex_grow: 15
+            radius: ${rad_s}
             widgets:
-              - label: { id: v_bal, x: 16, y: 9, width: 215, text: "BALANCING  --", text_font: montserrat_16, text_color: "0x${c_blue}" }
-              - label: { id: v_canerr, x: 235, y: 9, width: 209, text: "CAN ERRORS  --", text_align: RIGHT, text_font: montserrat_16, text_color: "0x${c_blue}" }
-              - label: { id: v_iso, x: 12, y: 38, width: 436, text: "ISOLATION  --", text_align: CENTER, text_font: montserrat_18, text_color: "0x${c_blue}" }
+              - obj:
+                  styles: st_bare
+                  align: CENTER
+                  scrollable: false
+                  clickable: false
+                  width: 96%
+                  height: 90%
+                  layout:
+                    type: GRID
+                    grid_columns: ["FR(1)", "FR(1)"]
+                    grid_rows: ["FR(1)", "FR(1)"]
+                  widgets:
+                    - label: { id: v_bal, grid_cell_column_pos: 0, grid_cell_row_pos: 0, grid_cell_x_align: START, grid_cell_y_align: CENTER, text: "BALANCING  --", text_font: m_m, text_color: "0x${c_blue}" }
+                    - label: { id: v_canerr, grid_cell_column_pos: 1, grid_cell_row_pos: 0, grid_cell_x_align: END, grid_cell_y_align: CENTER, text: "CAN ERRORS  --", text_font: m_m, text_color: "0x${c_blue}" }
+                    - label: { id: v_iso, grid_cell_column_pos: 0, grid_cell_column_span: 2, grid_cell_row_pos: 1, grid_cell_x_align: CENTER, grid_cell_y_align: CENTER, text: "ISOLATION  --", text_font: m_l, text_color: "0x${c_blue}" }
 
     # =========================================================================
-    # ENERGY - the capacity screen of the reference's 320x170 sibling, at 480x480
+    # ENERGY - the capacity screen of the reference's 320x170 sibling
+    # A grid: two columns, three rows (weights en_w1..3).
     # =========================================================================
     - id: pg_energy
       styles: st_page
+      scrollable: false
+      layout: *pg_column
       on_load:
         - script.execute: { id: page_loaded, page: 5 }
       on_swipe_left: *swipe_next
@@ -2500,72 +2648,95 @@ lvgl:
         - obj:
             styles: st_title
             scrollable: false
-            x: 10
-            y: 8
-            width: 460
-            height: 54
+            width: 100%
+            height: ${th}
             widgets:
-              - label: { x: 0, y: 8, width: 460, text: "ENERGY", text_align: CENTER, text_font: inter_d32 }
+              - label: { align: CENTER, text: "ENERGY", text_font: f_ttl }
         - obj:
-            styles: st_card
+            styles: st_bare
             scrollable: false
-            x: 10
-            y: 70
-            width: 225
-            height: 146
+            width: 100%
+            flex_grow: 1
+            layout:
+              type: GRID
+              grid_columns: ["FR(1)", "FR(1)"]
+              grid_rows: ["FR(${en_w1})", "FR(${en_w2})", "FR(${en_w3})"]
+              pad_row: ${g}
+              pad_column: ${g}
             widgets:
-              - label: { x: 10, y: 5, text: "REMAINING", text_font: inter_14 }
-              - label: { id: v_rem, x: 0, y: 48, width: 225, text: "-- kWh", text_align: CENTER, text_font: inter_d32, text_color: "0x${c_blue}" }
-              - label: { id: v_soh_e, x: 12, y: 112, width: 200, text: "SOH --", text_font: inter_16, text_color: "0x${c_green}" }
-        - obj:
-            styles: st_card
-            scrollable: false
-            x: 245
-            y: 70
-            width: 225
-            height: 146
-            widgets:
-              - label: { x: 10, y: 5, text: "TOTAL", text_font: inter_14 }
-              - label: { id: v_cap, x: 0, y: 48, width: 225, text: "-- kWh", text_align: CENTER, text_font: inter_d32, text_color: "0x${c_blue}" }
-              - label: { id: v_rep, x: 12, y: 114, width: 205, text: "REPORTED  --", long_mode: DOT, text_font: inter_14, text_color: "0x${c_muted}" }
-        - obj:
-            styles: st_card
-            scrollable: false
-            x: 10
-            y: 224
-            width: 225
-            height: 100
-            widgets:
-              - label: { x: 10, y: 5, text: "CHARGED", text_font: inter_14 }
-              - label: { id: v_tchg, x: 0, y: 40, width: 225, text: "-- kWh", text_align: CENTER, text_font: inter_d32, text_color: "0x${c_green}" }
-        - obj:
-            styles: st_card
-            scrollable: false
-            x: 245
-            y: 224
-            width: 225
-            height: 100
-            widgets:
-              - label: { x: 10, y: 5, text: "DISCHARGED", text_font: inter_14 }
-              - label: { id: v_tdis, x: 0, y: 40, width: 225, text: "-- kWh", text_align: CENTER, text_font: inter_d32, text_color: "0x${c_blue}" }
-        - obj:
-            styles: st_card
-            scrollable: false
-            x: 10
-            y: 332
-            width: 460
-            height: 110
-            widgets:
-              - label: { x: 10, y: 5, text: "LIMITS", text_font: inter_14 }
-              - label: { id: v_limit, x: 0, y: 28, width: 458, text: "LIMITED BY  --", text_align: CENTER, text_font: montserrat_18, text_color: "0x${c_muted}" }
-              - label: { id: v_ovr, x: 0, y: 58, width: 458, text: "USER OVERRIDE  --", text_align: CENTER, text_font: montserrat_14, text_color: "0x${c_muted}" }
-              - label: { id: v_rcur, x: 0, y: 81, width: 458, text: "CURRENT TO INVERTER  --", text_align: CENTER, text_font: montserrat_14, text_color: "0x${c_muted}" }
+              - obj:
+                  styles: st_card
+                  scrollable: false
+                  grid_cell_column_pos: 0
+                  grid_cell_row_pos: 0
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
+                  widgets:
+                    - label: { align: TOP_LEFT, x: "${pad}", y: "${cap_y}", text: "REMAINING", text_font: f_cap }
+                    - label: { id: v_rem, align: CENTER, y: "${ -en_dy }", width: 100%, text: "-- kWh", text_align: CENTER, text_font: f_ttl, text_color: "0x${c_blue}" }
+                    - label: { id: v_soh_e, align: BOTTOM_LEFT, x: "${pad}", y: "${ -pad }", text: "SOH --", text_font: f_txt, text_color: "0x${c_green}" }
+              - obj:
+                  styles: st_card
+                  scrollable: false
+                  grid_cell_column_pos: 1
+                  grid_cell_row_pos: 0
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
+                  widgets:
+                    - label: { align: TOP_LEFT, x: "${pad}", y: "${cap_y}", text: "TOTAL", text_font: f_cap }
+                    - label: { id: v_cap, align: CENTER, y: "${ -en_dy }", width: 100%, text: "-- kWh", text_align: CENTER, text_font: f_ttl, text_color: "0x${c_blue}" }
+                    - label: { id: v_rep, align: BOTTOM_LEFT, x: "${pad}", y: "${ -pad }", width: 92%, text: "REPORTED  --", long_mode: DOT, text_font: f_cap, text_color: "0x${c_muted}" }
+              - obj:
+                  styles: st_card
+                  scrollable: false
+                  grid_cell_column_pos: 0
+                  grid_cell_row_pos: 1
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
+                  widgets:
+                    - label: { align: TOP_LEFT, x: "${pad}", y: "${cap_y}", text: "CHARGED", text_font: f_cap }
+                    - label: { id: v_tchg, align: CENTER, y: "${en_dy2}", width: 100%, text: "-- kWh", text_align: CENTER, text_font: f_ttl, text_color: "0x${c_green}" }
+              - obj:
+                  styles: st_card
+                  scrollable: false
+                  grid_cell_column_pos: 1
+                  grid_cell_row_pos: 1
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
+                  widgets:
+                    - label: { align: TOP_LEFT, x: "${pad}", y: "${cap_y}", text: "DISCHARGED", text_font: f_cap }
+                    - label: { id: v_tdis, align: CENTER, y: "${en_dy2}", width: 100%, text: "-- kWh", text_align: CENTER, text_font: f_ttl, text_color: "0x${c_blue}" }
+              - obj:
+                  styles: st_card
+                  scrollable: false
+                  grid_cell_column_pos: 0
+                  grid_cell_column_span: 2
+                  grid_cell_row_pos: 2
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
+                  widgets:
+                    - label: { align: TOP_LEFT, x: "${pad}", y: "${cap_y}", text: "LIMITS", text_font: f_cap }
+                    - obj:
+                        styles: st_bare
+                        align: CENTER
+                        y: "${en_dy3}"
+                        scrollable: false
+                        clickable: false
+                        width: 100%
+                        height: SIZE_CONTENT
+                        layout: { type: FLEX, flex_flow: COLUMN, flex_align_cross: CENTER, pad_row: "${en_gap}" }
+                        widgets:
+                          - label: { id: v_limit, width: 100%, text: "LIMITED BY  --", text_align: CENTER, text_font: m_l, text_color: "0x${c_muted}" }
+                          - label: { id: v_ovr, width: 100%, text: "USER OVERRIDE  --", text_align: CENTER, text_font: m_s, text_color: "0x${c_muted}" }
+                          - label: { id: v_rcur, width: 100%, text: "CURRENT TO INVERTER  --", text_align: CENTER, text_font: m_s, text_color: "0x${c_muted}" }
 
     # =========================================================================
     # DISPLAY MENU - uBuildControl(): an evenly spaced 2 x 4 grid
     # =========================================================================
     - id: pg_menu
       styles: st_page
+      scrollable: false
+      layout: *pg_column
       on_load:
         - script.execute: { id: page_loaded, page: 6 }
       on_swipe_left: *swipe_next
@@ -2574,78 +2745,104 @@ lvgl:
         - obj:
             styles: st_title
             scrollable: false
-            x: 10
-            y: 8
-            width: 460
-            height: 54
+            width: 100%
+            height: ${th}
             widgets:
-              - label: { x: 0, y: 8, width: 460, text: "DISPLAY MENU", text_align: CENTER, text_font: inter_d32 }
-        - button:
-            x: 10
-            y: 80
-            width: 220
-            height: 54
-            on_click: [ lvgl.page.show: pg_main ]
-            widgets: [ label: { text: "MAIN SCREEN", align: CENTER } ]
-        - button:
-            x: 240
-            y: 80
-            width: 220
-            height: 54
-            on_click: [ lvgl.page.show: pg_cells ]
-            widgets: [ label: { text: "CELL MONITOR", align: CENTER } ]
-        - button:
-            x: 10
-            y: 164
-            width: 220
-            height: 54
-            on_click: [ lvgl.page.show: pg_info ]
-            widgets: [ label: { text: "BATTERY INFO", align: CENTER } ]
-        - button:
-            x: 240
-            y: 164
-            width: 220
-            height: 54
-            on_click: [ lvgl.page.show: pg_events ]
-            widgets: [ label: { text: "EVENTS", align: CENTER } ]
-        - button:
-            x: 10
-            y: 248
-            width: 220
-            height: 54
-            on_click: [ lvgl.page.show: pg_energy ]
-            widgets: [ label: { text: "ENERGY", align: CENTER } ]
-        - button:
-            x: 240
-            y: 248
-            width: 220
-            height: 54
-            on_click: [ lvgl.page.show: pg_system ]
-            widgets: [ label: { text: "SYSTEM", align: CENTER } ]
-        - button:
-            id: menu_next               # hidden by emu_boot when only one emulator is set
-            x: 10
-            y: 332
-            width: 220
-            height: 54
-            on_click: [ script.execute: next_emulator ]
-            widgets: [ label: { text: "NEXT EMULATOR", align: CENTER } ]
-        - button:
-            id: menu_off                # widened by emu_boot when NEXT EMULATOR is hidden
-            x: 240
-            y: 332
-            width: 220
-            height: 54
-            border_color: "0x${c_green}"
-            on_click: [ script.execute: screen_off ]
-            widgets: [ label: { text: "SCREEN OFF", align: CENTER, text_color: "0x${c_green}" } ]
-        - label: { id: v_toast, x: 20, y: 425, width: 440, text: "", text_align: CENTER, text_font: inter_14, text_color: "0x${c_green}", hidden: true }
+              - label: { align: CENTER, text: "DISPLAY MENU", text_font: f_ttl }
+        - obj:
+            styles: st_bare
+            scrollable: false
+            width: 100%
+            flex_grow: 1
+            layout:
+              type: GRID
+              grid_columns: ["FR(1)", "FR(1)"]
+              grid_rows: ["FR(1)", "FR(1)", "FR(1)", "FR(1)"]
+              pad_column: ${menu_gap}
+            widgets:
+              - button:
+                  height: ${menu_bh}
+                  grid_cell_column_pos: 0
+                  grid_cell_row_pos: 0
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: CENTER
+                  on_click: [ lvgl.page.show: pg_main ]
+                  widgets: [ label: { text: "MAIN SCREEN", align: CENTER } ]
+              - button:
+                  height: ${menu_bh}
+                  grid_cell_column_pos: 1
+                  grid_cell_row_pos: 0
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: CENTER
+                  on_click: [ lvgl.page.show: pg_cells ]
+                  widgets: [ label: { text: "CELL MONITOR", align: CENTER } ]
+              - button:
+                  height: ${menu_bh}
+                  grid_cell_column_pos: 0
+                  grid_cell_row_pos: 1
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: CENTER
+                  on_click: [ lvgl.page.show: pg_info ]
+                  widgets: [ label: { text: "BATTERY INFO", align: CENTER } ]
+              - button:
+                  height: ${menu_bh}
+                  grid_cell_column_pos: 1
+                  grid_cell_row_pos: 1
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: CENTER
+                  on_click: [ lvgl.page.show: pg_events ]
+                  widgets: [ label: { text: "EVENTS", align: CENTER } ]
+              - button:
+                  height: ${menu_bh}
+                  grid_cell_column_pos: 0
+                  grid_cell_row_pos: 2
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: CENTER
+                  on_click: [ lvgl.page.show: pg_energy ]
+                  widgets: [ label: { text: "ENERGY", align: CENTER } ]
+              - button:
+                  height: ${menu_bh}
+                  grid_cell_column_pos: 1
+                  grid_cell_row_pos: 2
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: CENTER
+                  on_click: [ lvgl.page.show: pg_system ]
+                  widgets: [ label: { text: "SYSTEM", align: CENTER } ]
+              - button:
+                  id: menu_next               # hidden by emu_boot when only one emulator is set
+                  height: ${menu_bh}
+                  grid_cell_column_pos: 0
+                  grid_cell_row_pos: 3
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: CENTER
+                  on_click: [ script.execute: next_emulator ]
+                  widgets: [ label: { text: "NEXT EMULATOR", align: CENTER } ]
+              - button:
+                  id: menu_off                # spans the row when NEXT EMULATOR is hidden (emu_boot)
+                  height: ${menu_bh}
+                  border_color: "0x${c_green}"
+                  grid_cell_column_pos: 1
+                  grid_cell_row_pos: 3
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: CENTER
+                  on_click: [ script.execute: screen_off ]
+                  widgets: [ label: { text: "SCREEN OFF", align: CENTER, text_color: "0x${c_green}" } ]
+        # The feedback line of NEXT EMULATOR, in a strip of its own under the buttons.
+        - obj:
+            styles: st_bare
+            scrollable: false
+            width: 100%
+            height: ${foc_h}
+            widgets:
+              - label: { id: v_toast, align: CENTER, width: 100%, text: "", text_align: CENTER, text_font: f_cap, text_color: "0x${c_green}", hidden: true }
 
     # =========================================================================
     # SYSTEM - uBuildSystem(), the connection-setup button becomes the emulator selector
     # =========================================================================
     - id: pg_system
       styles: st_page
+      scrollable: false
+      layout: *pg_column
       on_load:
         - script.execute: { id: page_loaded, page: 7 }
       on_swipe_left: *swipe_next
@@ -2654,68 +2851,64 @@ lvgl:
         - obj:
             styles: st_title
             scrollable: false
-            x: 10
-            y: 8
-            width: 460
-            height: 54
+            width: 100%
+            height: ${th}
             widgets:
-              - label: { x: 0, y: 8, width: 460, text: "SYSTEM", text_align: CENTER, text_font: inter_d32 }
+              - label: { align: CENTER, text: "SYSTEM", text_font: f_ttl }
         # Two cards in the same place; the checked selector button picks which one
         # shows (show_sys_view). Emulator diagnostics scroll vertically in theirs.
         - obj:
             id: sys_emu
             styles: st_card
-            x: 10
-            y: 72
-            width: 460
-            height: 298
-            pad_left: 16
-            pad_right: 16
-            pad_top: 8
-            pad_bottom: 8
+            width: 100%
+            flex_grow: 1
+            pad_left: ${sp_x}
+            pad_right: ${sp_x}
+            pad_top: ${sp_y}
+            pad_bottom: ${sp_y}
             scroll_dir: VER
             scrollbar_mode: AUTO
             layout:
               type: GRID
               grid_columns: [FR(40), FR(60)]
-              grid_rows: [22, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 34, 28, 28, 28, 28, 28]
+              grid_rows: "${sys_emu_rows}"
             widgets:
-              - label: { text: "EMULATOR", text_font: montserrat_12, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_column_span: 2, grid_cell_row_pos: 0, grid_cell_y_align: END }
-              - label: { text: "ESPNow", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 1, grid_cell_y_align: CENTER }
-              - label: { id: v_link, text: "OFFLINE", text_font: montserrat_16, text_color: "0x${c_red}", grid_cell_column_pos: 1, grid_cell_row_pos: 1, grid_cell_x_align: END, grid_cell_y_align: CENTER }
-              - label: { text: "FRAMES", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 2, grid_cell_y_align: CENTER }
-              - label: { id: v_frames, text: "0", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 2, grid_cell_x_align: END, grid_cell_y_align: CENTER }
-              - label: { text: "FIRMWARE", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 3, grid_cell_y_align: CENTER }
-              - label: { id: v_fw, text: "--", text_font: montserrat_16, long_mode: DOT, width: 100%, text_align: RIGHT, grid_cell_column_pos: 1, grid_cell_row_pos: 3, grid_cell_x_align: END, grid_cell_y_align: CENTER }
-              - label: { text: "HOSTNAME", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 4, grid_cell_y_align: CENTER }
-              - label: { id: v_host, text: "--", text_font: montserrat_16, long_mode: DOT, width: 100%, text_align: RIGHT, grid_cell_column_pos: 1, grid_cell_row_pos: 4, grid_cell_x_align: END, grid_cell_y_align: CENTER }
-              - label: { text: "UPTIME", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 5, grid_cell_y_align: CENTER }
-              - label: { id: v_uptime, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 5, grid_cell_x_align: END, grid_cell_y_align: CENTER }
-              - label: { text: "SYSTEM", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 6, grid_cell_y_align: CENTER }
-              - label: { id: v_sysst, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 6, grid_cell_x_align: END, grid_cell_y_align: CENTER }
-              - label: { text: "STATUS", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 7, grid_cell_y_align: CENTER }
-              - label: { id: v_emust, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 7, grid_cell_x_align: END, grid_cell_y_align: CENTER }
-              - label: { text: "PAUSE", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 8, grid_cell_y_align: CENTER }
-              - label: { id: v_pause, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 8, grid_cell_x_align: END, grid_cell_y_align: CENTER }
-              - label: { text: "EVENT LEVEL", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 9, grid_cell_y_align: CENTER }
-              - label: { id: v_evlvl, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 9, grid_cell_x_align: END, grid_cell_y_align: CENTER }
-              - label: { text: "CPU TEMP", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 10, grid_cell_y_align: CENTER }
-              - label: { id: v_cpu, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 10, grid_cell_x_align: END, grid_cell_y_align: CENTER }
-              - label: { text: "FREE HEAP", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 11, grid_cell_y_align: CENTER }
-              - label: { id: v_heap, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 11, grid_cell_x_align: END, grid_cell_y_align: CENTER }
-              - label: { text: "LED MODE", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 12, grid_cell_y_align: CENTER }
-              - label: { id: v_led, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 12, grid_cell_x_align: END, grid_cell_y_align: CENTER }
-              - label: { text: "NETWORK", text_font: montserrat_12, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_column_span: 2, grid_cell_row_pos: 13, grid_cell_y_align: END }
-              - label: { text: "IP", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 14, grid_cell_y_align: CENTER }
-              - label: { id: v_ip, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 14, grid_cell_x_align: END, grid_cell_y_align: CENTER }
-              - label: { text: "MAC", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 15, grid_cell_y_align: CENTER }
-              - label: { id: v_mac, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 15, grid_cell_x_align: END, grid_cell_y_align: CENTER }
-              - label: { text: "SSID", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 16, grid_cell_y_align: CENTER }
-              - label: { id: v_ssid, text: "--", text_font: montserrat_16, long_mode: DOT, width: 100%, text_align: RIGHT, grid_cell_column_pos: 1, grid_cell_row_pos: 16, grid_cell_x_align: END, grid_cell_y_align: CENTER }
-              - label: { text: "SIGNAL", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 17, grid_cell_y_align: CENTER }
-              - label: { id: v_rssi, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 17, grid_cell_x_align: END, grid_cell_y_align: CENTER }
-              - label: { text: "AP MODE", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 18, grid_cell_y_align: CENTER }
-              - label: { id: v_ap, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 18, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "EMULATOR", text_font: m_hint, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_column_span: 2, grid_cell_row_pos: 0, grid_cell_y_align: END }
+              - label: { text: "ESPNow", text_font: m_m, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 1, grid_cell_y_align: CENTER }
+              - label: { id: v_link, text: "OFFLINE", text_font: m_m, text_color: "0x${c_red}", grid_cell_column_pos: 1, grid_cell_row_pos: 1, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "FRAMES", text_font: m_m, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 2, grid_cell_y_align: CENTER }
+              - label: { id: v_frames, text: "0", text_font: m_m, grid_cell_column_pos: 1, grid_cell_row_pos: 2, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "FIRMWARE", text_font: m_m, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 3, grid_cell_y_align: CENTER }
+              - label: { id: v_fw, text: "--", text_font: m_m, long_mode: DOT, width: 100%, text_align: RIGHT, grid_cell_column_pos: 1, grid_cell_row_pos: 3, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "HOSTNAME", text_font: m_m, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 4, grid_cell_y_align: CENTER }
+              - label: { id: v_host, text: "--", text_font: m_m, long_mode: DOT, width: 100%, text_align: RIGHT, grid_cell_column_pos: 1, grid_cell_row_pos: 4, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "UPTIME", text_font: m_m, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 5, grid_cell_y_align: CENTER }
+              - label: { id: v_uptime, text: "--", text_font: m_m, grid_cell_column_pos: 1, grid_cell_row_pos: 5, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "SYSTEM", text_font: m_m, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 6, grid_cell_y_align: CENTER }
+              - label: { id: v_sysst, text: "--", text_font: m_m, grid_cell_column_pos: 1, grid_cell_row_pos: 6, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "STATUS", text_font: m_m, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 7, grid_cell_y_align: CENTER }
+              - label: { id: v_emust, text: "--", text_font: m_m, grid_cell_column_pos: 1, grid_cell_row_pos: 7, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "PAUSE", text_font: m_m, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 8, grid_cell_y_align: CENTER }
+              - label: { id: v_pause, text: "--", text_font: m_m, grid_cell_column_pos: 1, grid_cell_row_pos: 8, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "EVENT LEVEL", text_font: m_m, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 9, grid_cell_y_align: CENTER }
+              - label: { id: v_evlvl, text: "--", text_font: m_m, grid_cell_column_pos: 1, grid_cell_row_pos: 9, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "CPU TEMP", text_font: m_m, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 10, grid_cell_y_align: CENTER }
+              - label: { id: v_cpu, text: "--", text_font: m_m, grid_cell_column_pos: 1, grid_cell_row_pos: 10, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "FREE HEAP", text_font: m_m, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 11, grid_cell_y_align: CENTER }
+              - label: { id: v_heap, text: "--", text_font: m_m, grid_cell_column_pos: 1, grid_cell_row_pos: 11, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "LED MODE", text_font: m_m, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 12, grid_cell_y_align: CENTER }
+              - label: { id: v_led, text: "--", text_font: m_m, grid_cell_column_pos: 1, grid_cell_row_pos: 12, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "NETWORK", text_font: m_hint, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_column_span: 2, grid_cell_row_pos: 13, grid_cell_y_align: END }
+              - label: { text: "IP", text_font: m_m, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 14, grid_cell_y_align: CENTER }
+              - label: { id: v_ip, text: "--", text_font: m_m, grid_cell_column_pos: 1, grid_cell_row_pos: 14, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "MAC", text_font: m_m, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 15, grid_cell_y_align: CENTER }
+              - label: { id: v_mac, text: "--", text_font: m_m, grid_cell_column_pos: 1, grid_cell_row_pos: 15, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "SSID", text_font: m_m, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 16, grid_cell_y_align: CENTER }
+              - label: { id: v_ssid, text: "--", text_font: m_m, long_mode: DOT, width: 100%, text_align: RIGHT, grid_cell_column_pos: 1, grid_cell_row_pos: 16, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "SIGNAL", text_font: m_m, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 17, grid_cell_y_align: CENTER }
+              - label: { id: v_rssi, text: "--", text_font: m_m, grid_cell_column_pos: 1, grid_cell_row_pos: 17, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "AP MODE", text_font: m_m, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 18, grid_cell_y_align: CENTER }
+              - label: { id: v_ap, text: "--", text_font: m_m, grid_cell_column_pos: 1, grid_cell_row_pos: 18, grid_cell_x_align: END, grid_cell_y_align: CENTER }
         # This display / ESPHome itself. Everything fits, so no scrolling here - which
         # also keeps a drag on the slider from ever becoming a scroll.
         - obj:
@@ -2723,22 +2916,20 @@ lvgl:
             styles: st_card
             scrollable: false
             hidden: true
-            x: 10
-            y: 72
-            width: 460
-            height: 298
-            pad_left: 16
-            pad_right: 22
-            pad_top: 8
-            pad_bottom: 8
+            width: 100%
+            flex_grow: 1
+            pad_left: ${sp_x}
+            pad_right: ${sp_x2}
+            pad_top: ${sp_y}
+            pad_bottom: ${sp_y}
             layout:
               type: GRID
               pad_row: 0
               grid_columns: [FR(40), FR(60)]
-              grid_rows: [22, 44, 35, 35, 35, 35, 35, 35]
+              grid_rows: "${sys_disp_rows}"
             widgets:
-              - label: { text: "THIS DISPLAY", text_font: montserrat_12, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_column_span: 2, grid_cell_row_pos: 0, grid_cell_y_align: END }
-              - label: { id: v_bl, text: "BACKLIGHT", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 1, grid_cell_y_align: CENTER }
+              - label: { text: "THIS DISPLAY", text_font: m_hint, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_column_span: 2, grid_cell_row_pos: 0, grid_cell_y_align: END }
+              - label: { id: v_bl, text: "BACKLIGHT", text_font: m_m, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 1, grid_cell_y_align: CENTER }
               # Bound to the bl_level number below, which stores the setting and
               # restores it at boot. 90 % is the floor.
               - slider:
@@ -2746,7 +2937,7 @@ lvgl:
                   min_value: 30
                   max_value: 100
                   value: 100
-                  height: 12
+                  height: ${sl_h}
                   gesture_bubble: false     # dragging it must not flip the page
                   grid_cell_column_pos: 1
                   grid_cell_row_pos: 1
@@ -2754,27 +2945,27 @@ lvgl:
                   grid_cell_y_align: CENTER
                   bg_color: "0x${c_arc_bg}"
                   bg_opa: COVER
-                  radius: 6
+                  radius: ${sl_r}
                   indicator:
                     bg_color: "0x${c_green}"
-                    radius: 6
+                    radius: ${sl_r}
                   knob:
                     bg_color: 0xFFFFFF
                     border_width: 0
                     shadow_width: 0
-                    pad_all: 6
-              - label: { text: "MAC ADDRESS", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 2, grid_cell_y_align: CENTER }
-              - label: { id: v_dmac, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 2, grid_cell_x_align: END, grid_cell_y_align: CENTER }
-              - label: { text: "SSID", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 3, grid_cell_y_align: CENTER }
-              - label: { id: v_dssid, text: "--", text_font: montserrat_16, long_mode: DOT, width: 100%, text_align: RIGHT, grid_cell_column_pos: 1, grid_cell_row_pos: 3, grid_cell_x_align: END, grid_cell_y_align: CENTER }
-              - label: { text: "WIFI SIGNAL", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 4, grid_cell_y_align: CENTER }
-              - label: { id: v_drssi, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 4, grid_cell_x_align: END, grid_cell_y_align: CENTER }
-              - label: { text: "IP ADDRESS", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 5, grid_cell_y_align: CENTER }
-              - label: { id: v_dip, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 5, grid_cell_x_align: END, grid_cell_y_align: CENTER }
-              - label: { text: "UPTIME", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 6, grid_cell_y_align: CENTER }
-              - label: { id: v_dup, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 6, grid_cell_x_align: END, grid_cell_y_align: CENTER }
-              - label: { text: "FREE HEAP", text_font: montserrat_16, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 7, grid_cell_y_align: CENTER }
-              - label: { id: v_dheap, text: "--", text_font: montserrat_16, grid_cell_column_pos: 1, grid_cell_row_pos: 7, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+                    pad_all: ${sl_knob}
+              - label: { text: "MAC ADDRESS", text_font: m_m, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 2, grid_cell_y_align: CENTER }
+              - label: { id: v_dmac, text: "--", text_font: m_m, grid_cell_column_pos: 1, grid_cell_row_pos: 2, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "SSID", text_font: m_m, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 3, grid_cell_y_align: CENTER }
+              - label: { id: v_dssid, text: "--", text_font: m_m, long_mode: DOT, width: 100%, text_align: RIGHT, grid_cell_column_pos: 1, grid_cell_row_pos: 3, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "WIFI SIGNAL", text_font: m_m, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 4, grid_cell_y_align: CENTER }
+              - label: { id: v_drssi, text: "--", text_font: m_m, grid_cell_column_pos: 1, grid_cell_row_pos: 4, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "IP ADDRESS", text_font: m_m, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 5, grid_cell_y_align: CENTER }
+              - label: { id: v_dip, text: "--", text_font: m_m, grid_cell_column_pos: 1, grid_cell_row_pos: 5, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "UPTIME", text_font: m_m, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 6, grid_cell_y_align: CENTER }
+              - label: { id: v_dup, text: "--", text_font: m_m, grid_cell_column_pos: 1, grid_cell_row_pos: 6, grid_cell_x_align: END, grid_cell_y_align: CENTER }
+              - label: { text: "FREE HEAP", text_font: m_m, text_color: "0x${c_muted}", grid_cell_column_pos: 0, grid_cell_row_pos: 7, grid_cell_y_align: CENTER }
+              - label: { id: v_dheap, text: "--", text_font: m_m, grid_cell_column_pos: 1, grid_cell_row_pos: 7, grid_cell_x_align: END, grid_cell_y_align: CENTER }
         # Selector, where the reference has its CONNECTION SETUP button: one button per
         # configured emulator, then Display. Buttons that emu_boot hides (unconfigured
         # emulators) drop out of the flex row and the rest share the width. The buttons
@@ -2782,37 +2973,33 @@ lvgl:
         # Tapping an emulator also starts watching it; Display leaves the watched
         # emulator alone.
         - obj:
-            x: 10
-            y: 380
-            width: 460
-            height: 62
+            styles: st_bare
             scrollable: false
-            bg_opa: TRANSP
-            border_width: 0
-            pad_all: 0
+            width: 100%
+            height: ${sel_h}
             layout:
               type: FLEX
               flex_flow: ROW
-              pad_column: 8
+              pad_column: ${g}
               flex_grow: 1
             widgets:
               - button:
                   id: emu_b1
-                  height: 62
+                  height: 100%
                   on_click: [ script.execute: { id: select_emulator, slot: 0 } ]
                   widgets: [ label: { text: "${emulator_1_name}", align: CENTER } ]
               - button:
                   id: emu_b2
-                  height: 62
+                  height: 100%
                   on_click: [ script.execute: { id: select_emulator, slot: 1 } ]
                   widgets: [ label: { text: "${emulator_2_name}", align: CENTER } ]
               - button:
                   id: emu_b3
-                  height: 62
+                  height: 100%
                   on_click: [ script.execute: { id: select_emulator, slot: 2 } ]
                   widgets: [ label: { text: "${emulator_3_name}", align: CENTER } ]
               - button:
                   id: disp_b
-                  height: 62
+                  height: 100%
                   on_click: [ script.execute: { id: show_sys_view, view: 1 } ]
                   widgets: [ label: { text: "Display", align: CENTER } ]

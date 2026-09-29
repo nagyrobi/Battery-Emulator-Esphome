@@ -1,0 +1,151 @@
+# =============================================================================
+# Screen-size tokens of the user interface.
+#
+# Included after the hardware pak (see `packages:` in the main config), which states
+# disp_w / disp_h / disp_rot. Everything the interface measures - margins, block
+# heights, font sizes - is worked out here from that, so the pages in the main config
+# carry no pixel numbers of their own.
+#
+# Each token is written "(square, wide)[ui_wide]" in pixels at ui_k = 1 and scaled.
+# To tune the look for one kind of screen, change its number here.
+# =============================================================================
+substitutions:
+  # ---------------------------------------------------------------------------------
+  # Screen and layout. The hardware pak states the panel size (disp_w / disp_h) and the
+  # rotation; everything the user interface measures follows from that.
+  #   ui_w x ui_h   the screen as LVGL sees it, after the rotation
+  #   ui_wide       1 for a landscape screen (width >= 1.25 x height), 0 for a square one
+  #   ui_k          scale: 1 at 480x480 (square) and at 480x320 (wide), so an 800x480
+  #                 screen is 1.5 and a 1024x600 one 1.875
+  #   ui_f          the same for text; wide screens have less height to spend, so their
+  #                 text is 15 % smaller than the blocks around it
+  # Below, every measure is written "(square, wide)[ui_wide]" in pixels at ui_k = 1.
+  # ---------------------------------------------------------------------------------
+  ui_w: ${ disp_h if disp_rot in [90, 270] else disp_w }
+  ui_h: ${ disp_w if disp_rot in [90, 270] else disp_h }
+  ui_wide: ${ 1 if ui_w >= 1.25 * ui_h else 0 }
+  ui_k: ${ [ui_w / 480, ui_h / (480, 320)[ui_wide]] | min }
+  ui_f: ${ ui_k * (1, 0.85)[ui_wide] }
+  # --- page frame
+  m: ${ ((10, 8)[ui_wide] * ui_k) | round | int }   # side margin of every page
+  pt: ${ ((8, 6)[ui_wide] * ui_k) | round | int }   # space above the title bar
+  g: ${ ((9, 6)[ui_wide] * ui_k) | round | int }   # gap between the blocks of a page
+  th: ${ ((54, 38)[ui_wide] * ui_k) | round | int }   # title bar height
+  foot: ${ ((28, 22)[ui_wide] * ui_k) | round | int }   # strip below the blocks, where the page dots sit
+  rad: ${ ((12, 10)[ui_wide] * ui_k) | round | int }   # corner radius of cards
+  rad_s: ${ ((10, 8)[ui_wide] * ui_k) | round | int }   # ... of smaller cards and buttons
+  pad: ${ ((10, 8)[ui_wide] * ui_k) | round | int }   # inset of a card's caption
+  cap_y: ${ ((5, 4)[ui_wide] * ui_k) | round | int }   # ... and its distance from the top
+  # --- page dots and heartbeat
+  dot_s: ${ ((12, 10)[ui_wide] * ui_k) | round | int }   # dot size
+  dot_p: ${ ((23, 19)[ui_wide] * ui_k) | round | int }   # dot pitch
+  dot_ext: ${ ((6, 5)[ui_wide] * ui_k) | round | int }   # extra touch area around a dot
+  dot_edge: ${ ((20, 15)[ui_wide] * ui_k) | round | int }   # top of a dot, from the bottom of the screen
+  hb_s: ${ ((8, 6)[ui_wide] * ui_k) | round | int }   # heartbeat dot
+  hb_edge: ${ ((8, 6)[ui_wide] * ui_k) | round | int }
+  hb_glow: ${ ((7, 5)[ui_wide] * ui_k) | round | int }
+  # --- MAIN: header
+  hdr_h: ${ ((55, 40)[ui_wide] * ui_k) | round | int }   # header card height
+  hdr_pl: ${ ((14, 10)[ui_wide] * ui_k) | round | int }   # its side padding
+  hdr_gap: ${ ((8, 6)[ui_wide] * ui_k) | round | int }   # space between its parts
+  hdr_st_w: ${ ((125, 100)[ui_wide] * ui_k) | round | int }   # width of the STATUS column
+  bat_w: ${ ((62, 44)[ui_wide] * ui_k) | round | int }   # battery frame
+  bat_h: ${ ((29, 22)[ui_wide] * ui_k) | round | int }
+  bat_r: ${ ((5, 4)[ui_wide] * ui_k) | round | int }
+  bat_bw: ${ ((2, 2)[ui_wide] * ui_k) | round | int }
+  bat_pad: ${ ((3, 2)[ui_wide] * ui_k) | round | int }
+  bcw: ${ ((9, 6)[ui_wide] * ui_k) | round | int }   # one of its four cells
+  bch: ${ ((17, 12)[ui_wide] * ui_k) | round | int }
+  bcg: ${ ((3, 2)[ui_wide] * ui_k) | round | int }   # space between cells
+  tip_w: ${ ((7, 5)[ui_wide] * ui_k) | round | int }   # battery terminal
+  tip_h: ${ ((11, 8)[ui_wide] * ui_k) | round | int }
+  arr_lw: ${ ((5, 4)[ui_wide] * ui_k) | round | int }   # flow arrow: line width
+  rule_h: ${ ((35, 26)[ui_wide] * ui_k) | round | int }   # separator before STATUS
+  # --- MAIN: readings
+  arc_lw: ${ ((22, 16)[ui_wide] * ui_k) | round | int }   # SOC arc thickness
+  soc_gap: ${ ((8, 3)[ui_wide] * ui_k) | round | int }   # gap in the stack inside the arc
+  soc_rule_w: ${ ((160, 110)[ui_wide] * ui_k) | round | int }   # the rule in that stack
+  big_dy: ${ ((6, 3)[ui_wide] * ui_k) | round | int }   # POWER / CURRENT figure, below the middle of its card
+  bot_h: ${ ((74, 46)[ui_wide] * ui_k) | round | int }   # bottom card: cells / energy, delta, temperature
+  bot_h_off: ${ ((84, 56)[ui_wide] * ui_k) | round | int }   # ... while there is no live data
+  bot_gap: ${ ((2, 0)[ui_wide] * ui_k) | round | int }   # gap between its two lines
+  warn_h: ${ ((34, 26)[ui_wide] * ui_k) | round | int }   # event bar
+  # --- BATTERIES
+  bt_tx: ${ ((15, -12)[ui_wide] * ui_k) | round | int }   # pack title: from the left (square) / right (wide) edge
+  bt_ty: ${ ((9, 5)[ui_wide] * ui_k) | round | int }
+  bt_x: ${ ((15, 12)[ui_wide] * ui_k) | round | int }   # pack text
+  bt_y: ${ ((38, 5)[ui_wide] * ui_k) | round | int }
+  bt_ls: ${ ((6, 3)[ui_wide] * ui_k) | round | int }   # line spacing of the pack text
+  # --- CELL MONITOR
+  st_h: ${ ((74, 60)[ui_wide] * ui_k) | round | int }   # MIN / MAX / DELTA / TEMP cards
+  st_vy: ${ ((6, 3)[ui_wide] * ui_k) | round | int }   # two-line value, above the bottom of its card
+  st_vy1: ${ ((6, 3)[ui_wide] * ui_k) | round | int }   # one-line value, below the middle of its card
+  tag_h: ${ ((18, 14)[ui_wide] * ui_k) | round | int }   # strip for the MIN / MAX tags
+  tag_w: ${ ((68, 56)[ui_wide] * ui_k) | round | int }   # ... one tag
+  foc_h: ${ ((22, 16)[ui_wide] * ui_k) | round | int }   # note line under the chart
+  bar_wmax: ${ ((18, 14)[ui_wide] * ui_k) | round | int }   # widest cell bar
+  bar_cap: ${ ((3, 2)[ui_wide] * ui_k) | round | int }   # balancing cap
+  bar_out: ${ ((2, 2)[ui_wide] * ui_k) | round | int }   # outline of the selected cell
+  # --- EVENTS
+  ev_pad: ${ ((8, 6)[ui_wide] * ui_k) | round | int }   # list padding
+  ev_gap: ${ ((8, 5)[ui_wide] * ui_k) | round | int }   # space between event cards
+  ev_h: ${ ((68, 58)[ui_wide] * ui_k) | round | int }   # event card height
+  ev_ix: ${ ((8, 6)[ui_wide] * ui_k) | round | int }   # event card: inner margin
+  ev_ty: ${ ((6, 4)[ui_wide] * ui_k) | round | int }   # ... first line
+  ev_my: ${ ((26, 21)[ui_wide] * ui_k) | round | int }   # ... message
+  ev_mh: ${ ((36, 32)[ui_wide] * ui_k) | round | int }   # ... its height
+  ev_r: ${ ((7, 6)[ui_wide] * ui_k) | round | int }   # ... corner radius
+  # --- BATTERY INFO / ENERGY / MENU
+  info_gap: ${ ((4, 2)[ui_wide] * ui_k) | round | int }   # lines in the health card
+  en_dy: ${ ((6, 4)[ui_wide] * ui_k) | round | int }   # figure of REMAINING / TOTAL, above the middle of its card
+  en_dy2: ${ ((8, 4)[ui_wide] * ui_k) | round | int }   # figure of CHARGED / DISCHARGED, below the middle
+  en_dy3: ${ ((8, 5)[ui_wide] * ui_k) | round | int }   # the LIMITS lines, below the middle
+  en_w1: ${ (15, 12)[ui_wide] }   # row weights of the ENERGY grid (LVGL allows 1-100 per row)
+  en_w2: ${ (10, 9)[ui_wide] }
+  en_w3: ${ (11, 13)[ui_wide] }
+  en_gap: ${ ((6, 3)[ui_wide] * ui_k) | round | int }   # gap between the LIMITS lines
+  menu_gap: ${ ((10, 8)[ui_wide] * ui_k) | round | int }   # space between menu columns
+  menu_bh: ${ ((54, 40)[ui_wide] * ui_k) | round | int }   # menu button height
+  # --- SYSTEM
+  sel_h: ${ ((62, 44)[ui_wide] * ui_k) | round | int }   # selector buttons
+  sp_x: ${ ((16, 12)[ui_wide] * ui_k) | round | int }   # card padding
+  sp_x2: ${ ((22, 18)[ui_wide] * ui_k) | round | int }
+  sp_y: ${ ((8, 6)[ui_wide] * ui_k) | round | int }
+  sh_h: ${ ((22, 18)[ui_wide] * ui_k) | round | int }   # heading row
+  sr_h: ${ ((28, 22)[ui_wide] * ui_k) | round | int }   # data row
+  sn_h: ${ ((34, 26)[ui_wide] * ui_k) | round | int }   # heading row of the NETWORK block
+  sl_h: ${ ((12, 10)[ui_wide] * ui_k) | round | int }   # backlight slider
+  sl_r: ${ ((6, 5)[ui_wide] * ui_k) | round | int }
+  sl_knob: ${ ((6, 5)[ui_wide] * ui_k) | round | int }
+  # --- derived
+  cw: ${ ui_w - 2 * m }                # width of the blocks of a page
+  dot_y: ${ ui_h - dot_edge }
+  soc_grow: ${ (3, 1)[ui_wide] }       # MAIN: the arc card and the POWER / CURRENT column share the width
+  pc_grow: ${ (2, 1)[ui_wide] }
+  arc_pct: 92                          # arc size, of its card
+  bot_c1: 142                          # bottom card: weights of its three columns
+  bot_c2: 160
+  bot_c3: 150
+  ar: ${ ui_k * (1, 0.75)[ui_wide] }   # scale of the flow arrow
+  arr_w: ${ (27 * ar) | round | int }
+  arr_h: ${ (18 * ar) | round | int }
+  arr_in: ${ [[(10 * ar) | int, 0], [0, (9 * ar) | int], [(10 * ar) | int, (18 * ar) | int], [0, (9 * ar) | int], [(27 * ar) | int, (9 * ar) | int]] }
+  arr_out: ${ [[(17 * ar) | int, 0], [(27 * ar) | int, (9 * ar) | int], [(17 * ar) | int, (18 * ar) | int], [(27 * ar) | int, (9 * ar) | int], [0, (9 * ar) | int]] }
+  bt_align: ${ ('TOP_LEFT', 'TOP_RIGHT')[ui_wide] }   # BATTERIES: pack title beside the text on wide screens
+  bt_w: ${ cw - 2 * bt_x }
+  sys_emu_rows: ${ [sh_h] + [sr_h] * 12 + [sn_h] + [sr_h] * 5 }
+  sys_disp_rows: ${ [sh_h, 'FR(4)'] + ['FR(3)'] * 6 }
+  # Text sizes at ui_f (Inter for the reference's Inter faces, Montserrat for its Montserrat).
+  fs_cap: ${ (14 * ui_f) | round | int }
+  fs_txt: ${ (16 * ui_f) | round | int }
+  fs_val: ${ (18 * ui_f) | round | int }
+  fs_ttl: ${ (32 * ui_f) | round | int }
+  fs_soc: ${ ((48, 28)[ui_wide] * ui_k) | round | int }
+  fs_volt: ${ ((32, 22)[ui_wide] * ui_k) | round | int }
+  fs_big: ${ (48 * ui_f) | round | int }
+  fs_hint: ${ (12 * ui_f) | round | int }
+  fs_s: ${ (14 * ui_f) | round | int }
+  fs_m: ${ (16 * ui_f) | round | int }
+  fs_l: ${ (18 * ui_f) | round | int }
+  fs_xl: ${ (20 * ui_f) | round | int }
+  fs_temp: ${ (40 * ui_f) | round | int }
