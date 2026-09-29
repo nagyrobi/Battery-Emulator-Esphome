@@ -1,19 +1,19 @@
 # Battery-Emulator-Esphome
 
-An ESPHome touch display for [Battery-Emulator](https://github.com/dalathegreat/Battery-Emulator).
+An [ESPHome](https://esphome.io/) touch display for [Battery-Emulator](https://github.com/dalathegreat/Battery-Emulator).
 It listens to the emulator's ESP-NOW telemetry (protocol v2, read-only, no router hop) and shows
 it on various ESP32-based displays, in the look of [sort282-rgb](https://github.com/sort282-rgb/battery-display-esp32-4848s040c),
 built with ESPHome's LVGL component.
 
 `be-monitor.yaml` is the config to compile. It needs ESPHome **2026.9.0** or newer.
 
-## Why ESPHome
+## Why [ESPHome](https://esphome.io/)
 
 * **Any display:** a board is one small YAML file in `pak/`; ESPHome has drivers for most panels and
   touch controllers, and LVGL draws the same interface on all of them.
 * **A lot of components:** add sensors, relays, MQTT, Bluetooth or anything else from the ESPHome
   catalogue to the same YAML; the device also appears in Home Assistant through the native API.
-* **Web UI and OTA:** the device serves its own web page (port 80) and takes firmware updates over
+* **Web UI and OTA:** the device can server its own webserver page and takes firmware updates over
   Wi-Fi, from a browser or the ESPHome dashboard.
 * **Your own build, your own security:** you compile the YAML yourself, from source you can read,
   with your own Wi-Fi credentials and keys (encrypted API, OTA password): no vendor firmware and
