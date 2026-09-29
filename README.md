@@ -11,7 +11,7 @@ You can watch up to 3 independent Battery Emulators at the same time, each suppo
 
 ## Why [ESPHome](https://esphome.io/)
 
-* **Any display:** a board is one small YAML file in `pak/`; ESPHome has drivers for most panels and
+* **Any display:** a board is one small YAML file in `pak/`; ESPHome has drivers for many panels and
   touch controllers, and LVGL draws the same interface on all of them.
 * **A lot of components:** add sensors, relays, MQTT, Bluetooth or anything else from the ESPHome
   catalogue to the same YAML; the device also appears in Home Assistant through the native API (not required though!).
@@ -19,7 +19,7 @@ You can watch up to 3 independent Battery Emulators at the same time, each suppo
   Wi-Fi, from a browser or the ESPHome dashboard.
 * **Your own build, your own security:** you compile the YAML yourself, from source you can read,
   with your own Wi-Fi credentials and keys (encrypted API, OTA password): no vendor firmware and
-  no cloud account.
+  no cloud account. No special build knowledge required!
 
 480x320:
 ![480x320](screenshots/overview_480x320.png)
