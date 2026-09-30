@@ -105,8 +105,8 @@ small below about 3.5".
 | [LILYGO T-Panel S3](https://www.aliexpress.com/item/1005012106068049.html) | 480x480 ST7701S RGB (its init SPI runs through the XL9535 port expander), CST3240 touch (`cst328` platform, I2C 0x1A) | ❓ | `lilygo_tpanel_s3` |
 | [LILYGO T-Display-S3, touch](https://www.aliexpress.com/item/1005006169138118.html) | 170x320 ST7789 used as 320x170 landscape, CST816 | ❓ | `lilygo_tdisplay_s3_touch` |
 | [LILYGO T-Display-S3, no touch](https://www.aliexpress.com/item/1005012703094985.html) | the same; the two buttons page through the screens | ❓ | `lilygo_tdisplay_s3` |
-| ESP32-2432S028R "Cheap Yellow Display" (plain ESP32, no PSRAM: comment `vnc` out) | 240x320 ILI9341 used as 320x240 landscape, XPT2046 resistive touch | ❓ | `esp32_2432s028r` |
-| The 2.4" resistive CYD ([ESP32-2432S024R](https://www.aliexpress.com/item/1005007544966311.html) pinout; plain ESP32, no PSRAM: comment `vnc` out) | 320x240 ILI9342 (`mipi_spi`) as it comes (no rotation), XPT2046 resistive touch on the panel's SPI bus, backlight GPIO27 | ✅ | `esp32_2432s024r` |
+| 2.8" CYD [ESP32-2432S028R](https://www.aliexpress.com/item/1005007544966311.html) plain ESP32, no PSRAM: comment `vnc` out) | 240x320 ILI9341, XPT2046 resistive touch | ❓ | `esp32_2432s028r` |
+| 2.4" CYD ([ESP32-2432S024R](https://www.aliexpress.com/item/1005007544966311.html) plain ESP32, no PSRAM: comment `vnc` out) | 320x240 ILI9342  XPT2046 resistive touch | ✅ | `esp32_2432s024r` |
 
 A pak provides the chip setup (`esp32`, `psram`), the buses, the backlight output
 `gpio_backlight_pwm`, the display `my_display`, the touch controller `my_touch` (whose
