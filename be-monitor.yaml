@@ -1892,7 +1892,7 @@ interval:
 binary_sensor:
   - platform: template
     id: be1_online
-    name: "BE1 Online"
+    name: "ESPNow reception"
     device_class: connectivity
     on_state:
       - script.execute: render_link
