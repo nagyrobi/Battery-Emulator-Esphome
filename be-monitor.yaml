@@ -215,7 +215,7 @@ font:
     size: ${fs_cap}
     bpp: 4
     glyphs: &ui_glyphs
-      - ' !"#$%&''()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~°·Δ—'
+      - ' !"#$%&''()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~°·Δ—↗↘'
   - file: "gfonts://Inter@500"
     id: f_txt                    # body text
     size: ${fs_txt}
@@ -865,8 +865,8 @@ espnow:
               if (multi) {
                 if (!std::isnan(rremw)) putf(id(v_mrem), "Remain %.1f kWh", rremw / 1000.0f);
                 if (!std::isnan(rcapw)) putf(id(v_mtot), "Total %.1f kWh", rcapw / 1000.0f);
-                if (!std::isnan(mdw))   putf(id(v_mdis), "Max — %.1f kW", mdw / 1000.0f);
-                if (!std::isnan(mcw))   putf(id(v_mchg), "Max + %.1f kW", mcw / 1000.0f);
+                if (!std::isnan(mdw))   putf(id(v_mdis), "Max ↘ %.1f kW", mdw / 1000.0f);
+                if (!std::isnan(mcw))   putf(id(v_mchg), "Max ↗ %.1f kW", mcw / 1000.0f);
               } else {
                 // Out-of-range cells go red against pack 1's design limits, or the
                 // reference's 3.000 / 4.250 V while those are not known.
@@ -1207,7 +1207,7 @@ script:
             {id(v_cmax), "MAX -- V"}, {id(v_cmin), "MIN  -- V"}, {id(v_delta), "Δ -- mV"},
             {id(v_temp), "--.-°C"},
             {id(v_mrem), "Remain -- kWh"}, {id(v_mtot), "Total -- kWh"},
-            {id(v_mdis), "Max — -- kW"}, {id(v_mchg), "Max + -- kW"},
+            {id(v_mdis), "Max ↘ -- kW"}, {id(v_mchg), "Max ↗ -- kW"},
             {id(bt_1), "WAITING FOR DATA"}, {id(bt_2), "WAITING FOR DATA"},
             {id(bt_3), "WAITING FOR DATA"},
             {id(c_tmp_v), "--\n--"},
@@ -2319,8 +2319,8 @@ lvgl:
                         layout: { type: FLEX, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER, flex_align_track: CENTER, pad_row: "${bot_gap}" }
                         widgets:
                           - label: { id: v_delta, text: "Δ -- mV", text_font: f_ttl, text_color: "0x${c_muted}" }
-                          - label: { id: v_mdis, text: "Max — -- kW", text_font: f_mb, text_color: "0x${c_blue}", hidden: true }
-                          - label: { id: v_mchg, text: "Max + -- kW", text_font: f_mb, text_color: "0x${c_green}", hidden: true }
+                          - label: { id: v_mdis, text: "Max ↘ -- kW", text_font: f_mb, text_color: "0x${c_blue}", hidden: true }
+                          - label: { id: v_mchg, text: "Max ↗ -- kW", text_font: f_mb, text_color: "0x${c_green}", hidden: true }
                     - obj: { id: sep_b, styles: st_rule, grid_cell_column_pos: 3, grid_cell_row_pos: 0, grid_cell_x_align: STRETCH, grid_cell_y_align: CENTER, height: 72% }
                     - obj:                 # column 3: the hottest cell
                         styles: st_bare
