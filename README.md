@@ -87,7 +87,7 @@ The emulator you pick on SYSTEM (or with NEXT EMULATOR) is remembered across res
 
 ## Displays preconfigured
 
-The boards marked with ✅ have been run. The others are written from the
+The boards marked with ✅ have been tested on real hardware. The others are written from the
 [esphome-devices](https://devices.esphome.io/) entry of the board and ESPHome's built-in display
 models, and check out with `esphome config` and C++ code generation, but nobody has put them on the
 real hardware yet: please test and give feedback. The screen size is
@@ -96,14 +96,14 @@ small below about 3.5".
 
 | Board | Screen | Tested | Pak (`pak/zz_be_mon_hw_...`) |
 |---|---|---|---|
-| [Guition ESP32-S3-4848S040](https://www.aliexpress.com/item/1005008214679682.html) | 480x480, ST7701S RGB, GT911 | ✅ | `guition_4848s040` |
+| [Panlee WT32-SC01 Plus](https://www.aliexpress.com/item/1005006156493813.html) | 320x480 ST7796 on an octal bus used as 480x320 landscape (`lvgl: rotation`), FT6336 touch; PSRAM set to octal (N16R8; the N16R2 has quad: drop `mode`) | ✅ | `panlee_wt32_sc01_plus` |
 | [Guition JC3248W535](https://www.aliexpress.com/item/1005007566315926.html) | 320x480 QSPI panel (AXS15231) used as 480x320 landscape (`lvgl: rotation`), AXS15231 touch | ✅ | `guition_jc3248w535` |
+| [Guition ESP32-S3-4848S040](https://www.aliexpress.com/item/1005008214679682.html) | 480x480, ST7701S RGB, GT911 | ✅ | `guition_4848s040` |
 | Guition JC4827W543(C) | 480x272, NV3041A QSPI, GT911 | ❓ | `guition_jc4827w543` |
 | Sunton ESP32-8048S043C | 800x480 RGB, GT911 | ❓ | `sunton_esp32_8048s043c` |
 | Elecrow CrowPanel 5.0" | 800x480 RGB, GT911 | ❓ | `elecrow_crowpanel_5` |
 | [TuYa T3E smart screen](https://www.aliexpress.com/item/1005009966444722.html) | 480x480 ST7701S RGB, GT911 | ❓ | `tuya_t3e` |
 | [LILYGO T-Panel S3](https://www.aliexpress.com/item/1005012106068049.html) | 480x480 ST7701S RGB (its init SPI runs through the XL9535 port expander), CST3240 touch (`cst328` platform, I2C 0x1A) | ❓ | `lilygo_tpanel_s3` |
-| Panlee WT32-SC01 Plus | 320x480 ST7796 on an octal bus used as 480x320 landscape (`lvgl: rotation`), FT6336 touch; PSRAM set to octal (N16R8; the N16R2 has quad: drop `mode`) | ✅ | `panlee_wt32_sc01_plus` |
 | [LILYGO T-Display-S3, touch](https://www.aliexpress.com/item/1005006169138118.html) | 170x320 ST7789 used as 320x170 landscape, CST816 | ❓ | `lilygo_tdisplay_s3_touch` |
 | [LILYGO T-Display-S3, no touch](https://www.aliexpress.com/item/1005012703094985.html) | the same; the two buttons page through the screens | ❓ | `lilygo_tdisplay_s3` |
 | 2.8" CYD [ESP32-2432S028R](https://www.aliexpress.com/item/1005007544966311.html) plain ESP32, no PSRAM: comment `vnc` out | 240x320 ILI9341, XPT2046 resistive touch | ❓ | `esp32_2432s028r` |
