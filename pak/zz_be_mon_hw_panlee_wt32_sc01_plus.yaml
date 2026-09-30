@@ -1,0 +1,98 @@
+# =============================================================================
+# Hardware pak: Panlee / Wireless-Tag WT32-SC01 Plus - 3.5" 320x480 ST7796 panel on an 8-bit
+# parallel bus (driven through the S3's octal SPI), FT6336 touch, ESP32-S3 with 16 MB flash and
+# PSRAM (set to octal below). Used as a 480x320 landscape screen.
+#
+# Included from the main config:
+#   packages:
+#     display_hw: !include pak/zz_be_mon_hw_panlee_wt32_sc01_plus.yaml
+# NOT RUN with this interface yet. Taken from a working configuration of the board; the
+# ESPHome display model WT32-SC01-PLUS brings the init sequence, the reset pin (GPIO4),
+# the mirroring and the inverted colours.
+#
+# PSRAM: `mode: octal` is for the modules that have octal PSRAM (N16R8). The N16R2 module
+# has 2 MB of quad PSRAM: if the log complains about the PSRAM at boot, remove the `mode`.
+#
+# The panel is a portrait one: `lvgl: rotation` makes it landscape (hardware rotation in the
+# display driver), and disp_rot has to say the same. Do not put `rotation` in the display
+# block: LVGL refuses it. LVGL also turns the touch points by that rotation, so the touch
+# controller has no transform of its own here (the swap_xy + mirror_y a display-level
+# rotation 90 needs is exactly what LVGL does). If taps land mirrored or swapped, add a
+# `transform` to the touchscreen. If the picture is upside down, use 270 in both places.
+# The board's UART (GPIO10 / 11, the EVSE header) is not used.
+#
+# What a pak provides: see zz_be_mon_hw_template.yaml
+# =============================================================================
+
+substitutions:
+  disp_w: 320              # the panel as its driver reports it ...
+  disp_h: 480
+  disp_rot: 90             # ... and the rotation that makes the UI 480x320 landscape
+
+esp32:
+  board: esp32-s3-devkitc-1
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+
+psram:
+  speed: 80MHz
+  mode: octal
+
+spi:
+  - id: display_qspi
+    type: octal
+    clk_pin: 47
+    data_pins:
+      - 9
+      - number: 46
+        ignore_strapping_warning: true
+      - number: 3
+        ignore_strapping_warning: true
+      - 8
+      - 18
+      - 17
+      - 16
+      - 15
+
+i2c:
+  id: touchscreen_bus
+  sda: 6
+  scl: 5
+  frequency: 400kHz
+
+output:
+  - platform: ledc
+    id: gpio_backlight_pwm
+    pin:
+      number: GPIO45
+      ignore_strapping_warning: true
+
+display:
+  - platform: mipi_spi
+    id: my_display
+    spi_id: display_qspi
+    model: WT32-SC01-PLUS
+    data_rate: 10MHz          # 20MHz is what other firmwares run this bus at
+    dc_pin:
+      number: 0
+      ignore_strapping_warning: true
+    update_interval: never
+    auto_clear_enabled: false
+
+touchscreen:
+  - platform: ft63x6
+    id: my_touch
+    i2c_id: touchscreen_bus
+    interrupt_pin: 7
+    display: my_display
+    on_release:
+      - script.execute: wake_ui
+
+lvgl:
+  displays:
+    - my_display
+  touchscreens:
+    - my_touch
+  buffer_size: 25%           # in internal RAM, which the octal bus can send from directly
+  rotation: 90
