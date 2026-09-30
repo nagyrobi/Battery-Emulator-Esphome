@@ -63,21 +63,64 @@
 # at build time, so the first compile needs internet access.
 # =============================================================================
 
+# --- Hardware and remote view ------------------------------------------------------
+# Everything that depends on the board and its display lives in pak/. Keep exactly ONE
+# `display_hw` line uncommented; the file for the display you have provides
+#   substitutions  disp_w / disp_h / disp_rot   panel size as the driver reports it and
+#                                               the LVGL rotation (landscape for wide panels)
+#   esp32, psram and the buses
+#   output         gpio_backlight_pwm           built into the `display_backlight` light below
+#   display        my_display
+#   touchscreen    my_touch, whose on_release runs the script `wake_ui`
+#                  (a board without touch runs it from its buttons instead)
+#   lvgl           displays, touchscreens, buffer_size (and rotation)
+# The user interface sizes itself from the resulting screen size. To add a display, copy
+# pak/zz_be_mon_hw_template.yaml.
+#
+# Packages are read bottom to top, which decides two things:
+#  - the layout tokens are worked out from what the hardware pak states, so `ui_layout` has
+#    to stay ABOVE it;
+#  - the lists they add to (LVGL's displays) are in the order the packages are written,
+#    and the panel has to be LVGL's first display, so `vnc` stays BELOW the hardware.
+packages:
+  ui_layout: !include pak/zz_be_mon_ui_layout.yaml
+  # ---- the board: exactly one of these ----------------------------------------------
+  # -- ESP32-S3 with PSRAM
+  display_hw: !include pak/zz_be_mon_hw_guition_4848s040.yaml           # 480x480  ST7701S RGB, GT911
+  # display_hw: !include pak/zz_be_mon_hw_panlee_wt32_sc01_plus.yaml   # 480x320  ST7796 on an octal bus (portrait panel, rotated), FT6336
+  # display_hw: !include pak/zz_be_mon_hw_guition_jc3248w535.yaml       # 480x320  AXS15231 QSPI (portrait panel, rotated), AXS15231 touch
+  # display_hw: !include pak/zz_be_mon_hw_guition_jc4827w543.yaml       # 480x272  NV3041A QSPI, GT911
+  # display_hw: !include pak/zz_be_mon_hw_sunton_esp32_8048s043c.yaml   # 800x480  RGB, GT911
+  # display_hw: !include pak/zz_be_mon_hw_elecrow_crowpanel_5.yaml      # 800x480  RGB, GT911
+  # display_hw: !include pak/zz_be_mon_hw_tuya_t3e.yaml                 # 480x480  ST7701S RGB, GT911
+  # display_hw: !include pak/zz_be_mon_hw_lilygo_tpanel_s3.yaml        # 480x480  ST7701S RGB (init over an XL9535 expander), CST3240 touch
+  # display_hw: !include pak/zz_be_mon_hw_lilygo_tdisplay_s3_touch.yaml # 320x170  ST7789 (rotated), CST816 touch
+  # display_hw: !include pak/zz_be_mon_hw_lilygo_tdisplay_s3.yaml       # 320x170  ST7789 (rotated), no touch: the two buttons page through
+  # -- ESP32 without PSRAM: comment `vnc` out as well
+  # display_hw: !include pak/zz_be_mon_hw_esp32_2432s028r.yaml          # 320x240  ILI9341, XPT2046 (the "Cheap Yellow Display")
+  # display_hw: !include pak/zz_be_mon_hw_esp32_2432s024r.yaml          # 320x240  ILI9342, XPT2046 on the panel's SPI bus (2.4" resistive CYD)
+  # ---- optional ---------------------------------------------------------------------
+  # Mirrors the screen to a VNC client, which can also click through it. Keeps a copy of
+  # the frame (width x height x 2 bytes) in RAM, so it wants PSRAM, and needs
+  # `vnc_password` in secrets.yaml. Comment it out on a board without PSRAM.
+  # vnc: !include pak/zz_be_mon_vnc.yaml
+  
 substitutions:
-  device_name: be-monitor-480
-  friendly_name: "Battery Monitor 480"
+  device_name: be-monitor
+  friendly_name: "Battery Monitor"
   # Name and STA MAC of each emulator this panel can watch: three slots. These are the
   # single source of truth - the SYSTEM buttons, the ESP-NOW peer list and the selection
   # logic are all built from them.
   # A slot whose MAC is "" is switched off: no peer, no SYSTEM button, skipped by NEXT
   # EMULATOR, and with only one slot left NEXT EMULATOR disappears from the menu. Leave
   # at least one MAC set. Do not delete the lines, empty them.
-  emulator_1_name: "Emulator 1"
-  emulator_1_mac: "a4:cb:8f:d7:c6:28"
+  emulator_1_name: "Emulator"
+  emulator_1_mac: "aa:bb:cc:dd:ee:ff"
   emulator_2_name: "Emulator 2"
-  emulator_2_mac: "A4:CB:8F:D7:28:04"
+  emulator_2_mac: ""
   emulator_3_name: "Emulator 3"
   emulator_3_mac: ""
+
   # Palette of the reference design (ui480.inc U_*() colours), bare RRGGBB so one value
   # serves YAML styles (0x${c}), lambdas (0x${c}) and label recolor markup (#${c} ..#).
   c_bg: "02070D"           # screen
@@ -149,48 +192,6 @@ api:
   reboot_timeout: 0s
   encryption:
     key: !secret encryption_key
-
-# --- Hardware and remote view ------------------------------------------------------
-# Everything that depends on the board and its display lives in pak/. Keep exactly ONE
-# `display_hw` line uncommented; the file for the display you have provides
-#   substitutions  disp_w / disp_h / disp_rot   panel size as the driver reports it and
-#                                               the LVGL rotation (landscape for wide panels)
-#   esp32, psram and the buses
-#   output         gpio_backlight_pwm           built into the `display_backlight` light below
-#   display        my_display
-#   touchscreen    my_touch, whose on_release runs the script `wake_ui`
-#                  (a board without touch runs it from its buttons instead)
-#   lvgl           displays, touchscreens, buffer_size (and rotation)
-# The user interface sizes itself from the resulting screen size. To add a display, copy
-# pak/zz_be_mon_hw_template.yaml.
-#
-# Packages are read bottom to top, which decides two things:
-#  - the layout tokens are worked out from what the hardware pak states, so `ui_layout` has
-#    to stay ABOVE it;
-#  - the lists they add to (LVGL's displays) are in the order the packages are written,
-#    and the panel has to be LVGL's first display, so `vnc` stays BELOW the hardware.
-packages:
-  ui_layout: !include pak/zz_be_mon_ui_layout.yaml
-  # ---- the board: exactly one of these ----------------------------------------------
-  # ESP32-S3 with PSRAM
-  display_hw: !include pak/zz_be_mon_hw_guition_4848s040.yaml           # 480x480  ST7701S RGB, GT911
-  # display_hw: !include pak/zz_be_mon_hw_guition_jc3248w535.yaml       # 480x320  AXS15231 QSPI (portrait panel, rotated), AXS15231 touch
-  # display_hw: !include pak/zz_be_mon_hw_guition_jc4827w543.yaml       # 480x272  NV3041A QSPI, GT911
-  # display_hw: !include pak/zz_be_mon_hw_sunton_esp32_8048s043c.yaml   # 800x480  RGB, GT911
-  # display_hw: !include pak/zz_be_mon_hw_elecrow_crowpanel_5.yaml      # 800x480  RGB, GT911
-  # display_hw: !include pak/zz_be_mon_hw_tuya_t3e.yaml                 # 480x480  ST7701S RGB, GT911
-  # display_hw: !include pak/zz_be_mon_hw_lilygo_tpanel_s3.yaml        # 480x480  ST7701S RGB (init over an XL9535 expander), CST3240 touch
-  # display_hw: !include pak/zz_be_mon_hw_panlee_wt32_sc01_plus.yaml   # 480x320  ST7796 on an octal bus (portrait panel, rotated), FT6336
-  # display_hw: !include pak/zz_be_mon_hw_lilygo_tdisplay_s3_touch.yaml # 320x170  ST7789 (rotated), CST816 touch
-  # display_hw: !include pak/zz_be_mon_hw_lilygo_tdisplay_s3.yaml       # 320x170  ST7789 (rotated), no touch: the two buttons page through
-  # ESP32 without PSRAM: comment `vnc` out as well
-  # display_hw: !include pak/zz_be_mon_hw_esp32_2432s028r.yaml          # 320x240  ILI9341, XPT2046 (the "Cheap Yellow Display")
-  # display_hw: !include pak/zz_be_mon_hw_esp32_2432s024r.yaml          # 320x240  ILI9342, XPT2046 on the panel's SPI bus (2.4" resistive CYD)
-  # ---- optional ---------------------------------------------------------------------
-  # Mirrors the screen to a VNC client, which can also click through it. Keeps a copy of
-  # the frame (width x height x 2 bytes) in RAM, so it wants PSRAM, and needs
-  # `vnc_password` in secrets.yaml. Comment it out on a board without PSRAM.
-  # vnc: !include pak/zz_be_mon_vnc.yaml
 
 light:
   - id: display_backlight
