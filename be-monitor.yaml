@@ -1894,6 +1894,8 @@ binary_sensor:
     id: be1_online
     name: "ESPNow reception"
     device_class: connectivity
+    on_press:
+      - script.execute: wake_ui
     on_state:
       - script.execute: render_link
 
