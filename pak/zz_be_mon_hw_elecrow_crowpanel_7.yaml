@@ -1,0 +1,84 @@
+# Elecrow CrowPanel Basic 7 inch V3.0 - DIS08070H
+
+substitutions:
+  disp_w: "800"
+  disp_h: "480"
+  disp_rot: "0"
+
+esphome:
+  includes:
+    - usb_disable.h
+  platformio_options:
+    board_build.esp-idf.memory_type: qio_opi
+    board_build.flash_mode: dio
+
+esp32:
+  board: esp32-s3-devkitc-1
+  flash_size: 4MB
+  cpu_frequency: 240MHz
+  framework:
+    type: esp-idf
+    advanced:
+      execute_from_psram: true
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+i2c:
+  id: touch_i2c
+  sda: GPIO19
+  scl: GPIO20
+  scan: false
+  frequency: 400kHz
+
+output:
+  - platform: ledc
+    id: gpio_backlight_pwm
+    pin: GPIO2
+    frequency: 1220Hz
+
+display:
+  - platform: mipi_rgb
+    model: RPI
+    id: my_display
+    color_order: RGB
+    invert_colors: true
+    update_interval: never
+    auto_clear_enabled: false
+    dimensions:
+      width: ${disp_w}
+      height: ${disp_h}
+    de_pin: GPIO41
+    hsync_pin: GPIO39
+    vsync_pin: GPIO40
+    pclk_pin: GPIO0
+    pclk_frequency: 15MHz
+    pclk_inverted: true
+    hsync_front_porch: 40
+    hsync_pulse_width: 48
+    hsync_back_porch: 13
+    vsync_front_porch: 1
+    vsync_pulse_width: 31
+    vsync_back_porch: 13
+    data_pins:
+      red: [14, 21, 47, 48, 45]
+      green: [9, 46, 3, 8, 16, 1]
+      blue: [15, 7, 6, 5, 4]
+
+touchscreen:
+  - platform: gt911
+    id: my_touch
+    i2c_id: touch_i2c
+    address: 0x5D
+    display: my_display
+    update_interval: 30ms
+    on_release:
+      - script.execute: wake_ui
+
+lvgl:
+  displays:
+    - my_display
+  touchscreens:
+    - my_touch
+  buffer_size: 10%
