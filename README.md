@@ -102,6 +102,7 @@ small below about 3.5".
 | Guition JC4827W543(C) | 480x272, NV3041A QSPI, GT911 | ❓ | `guition_jc4827w543` |
 | Sunton ESP32-8048S043C | 800x480 RGB, GT911 | ❓ | `sunton_esp32_8048s043c` |
 | Elecrow CrowPanel 5.0" | 800x480 RGB, GT911 | ❓ | `elecrow_crowpanel_5` |
+| Elecrow CrowPanel 7.0" V3.0 (DIS08070H) | 800x480 RGB, GT911 | ✅ | `elecrow_crowpanel_7` |  
 | [TuYa T3E smart screen](https://www.aliexpress.com/item/1005009966444722.html) | 480x480 ST7701S RGB, GT911 | ❓ | `tuya_t3e` |
 | [LILYGO T-Panel S3](https://www.aliexpress.com/item/1005012106068049.html) | 480x480 ST7701S RGB (its init SPI runs through the XL9535 port expander), CST3240 touch (`cst328` platform, I2C 0x1A) | ❓ | `lilygo_tpanel_s3` |
 | [LILYGO T-Display-S3, touch](https://www.aliexpress.com/item/1005006169138118.html) | 170x320 ST7789 used as 320x170 landscape, CST816 | ❓ | `lilygo_tdisplay_s3_touch` |
